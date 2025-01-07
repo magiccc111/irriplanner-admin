@@ -1,6 +1,3 @@
-const auth = firebase.auth();
-const db = firebase.firestore();
-
 // Login function
 async function login() {
     const email = document.getElementById('email').value;
