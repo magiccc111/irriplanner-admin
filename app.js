@@ -76,14 +76,17 @@ async function loadLicenses() {
         const snapshot = await db.collection('licenses').get();
         snapshot.forEach(doc => {
             const license = doc.data();
+            const activatedDate = license.activatedAt ? license.activatedAt.toDate().toLocaleDateString() : 'Nem aktivált';
             const row = `
                 <tr>
                     <td>${doc.id}</td>
                     <td>${license.customerName}</td>
                     <td>${license.status}</td>
                     <td>${license.expiresAt.toDate().toLocaleDateString()}</td>
+                    <td>${activatedDate}</td>
                     <td>
                         <button onclick="revokeLicense('${doc.id}')" class="btn btn-sm btn-danger">Revoke</button>
+                        <button onclick="deleteLicense('${doc.id}')" class="btn btn-sm btn-warning ms-1">Törlés</button>
                     </td>
                 </tr>
             `;
@@ -104,6 +107,18 @@ async function revokeLicense(licenseKey) {
             loadLicenses();
         } catch (error) {
             alert('Error revoking license: ' + error.message);
+        }
+    }
+}
+
+// Delete license
+async function deleteLicense(licenseKey) {
+    if (confirm('Biztosan törölni szeretné ezt a licenszet?')) {
+        try {
+            await db.collection('licenses').doc(licenseKey).delete();
+            loadLicenses();
+        } catch (error) {
+            alert('Hiba a licensz törlésekor: ' + error.message);
         }
     }
 }
