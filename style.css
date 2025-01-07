@@ -1,0 +1,12 @@
+.card {
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+}
+
+.table {
+    font-size: 0.9rem;
+}
+
+.btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+}
