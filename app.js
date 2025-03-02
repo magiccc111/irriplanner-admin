@@ -40,7 +40,8 @@ async function generateLicense() {
             status: 'active',
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             expiresAt: expiryDate,
-            activatedBy: null
+            activatedBy: null,
+            lastUsed: null
         });
 
         alert(`License generated: ${licenseKey}`);
@@ -80,6 +81,8 @@ async function loadLicenses() {
         snapshot.forEach(doc => {
             const license = doc.data();
             const activatedDate = license.activatedAt ? license.activatedAt.toDate().toLocaleDateString() : 'Nem aktivált';
+            const lastUsedDate = license.lastUsed ? license.lastUsed.toDate().toLocaleDateString() : 'Soha';
+            
             const row = `
                 <tr>
                     <td>${doc.id}</td>
@@ -87,6 +90,7 @@ async function loadLicenses() {
                     <td>${license.status}</td>
                     <td>${license.expiresAt.toDate().toLocaleDateString()}</td>
                     <td>${activatedDate}</td>
+                    <td>${lastUsedDate}</td>
                     <td>
                         <button onclick="revokeLicense('${doc.id}')" class="btn btn-sm btn-danger">Revoke</button>
                         <button onclick="deleteLicense('${doc.id}')" class="btn btn-sm btn-warning ms-1">Törlés</button>
