@@ -44,9 +44,9 @@
                 </div>
             </div>
 
-            <!-- License List -->
-            <div class="card p-3">
-                <h3 class="h5 mb-3">Active Licenses</h3>
+            <!-- Active Licenses -->
+            <div class="card p-3 mb-4">
+                <h3 class="h5 mb-3">Aktív Licencek</h3>
                 <div class="table-responsive">
                     <table class="table">
                         <thead>
@@ -59,8 +59,30 @@
                                 <th>Actions</th>
                             </tr>
                         </thead>
-                        <tbody id="licenseList">
-                            <!-- Licenses will be loaded here -->
+                        <tbody id="activeLicenseList">
+                            <!-- Active licenses will be loaded here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- Inactive Licenses -->
+            <div class="card p-3">
+                <h3 class="h5 mb-3">Inaktív Licencek</h3>
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>License Key</th>
+                                <th>Customer</th>
+                                <th>Status</th>
+                                <th>Expires</th>
+                                <th>Aktiválva</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="inactiveLicenseList">
+                            <!-- Inactive licenses will be loaded here -->
                         </tbody>
                     </table>
                 </div>

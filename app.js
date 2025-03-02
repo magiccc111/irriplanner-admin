@@ -69,8 +69,11 @@ function generateLicenseKey() {
 
 // Load and display licenses
 async function loadLicenses() {
-    const licensesTable = document.getElementById('licenseList');
-    licensesTable.innerHTML = '';
+    const activeLicensesTable = document.getElementById('activeLicenseList');
+    const inactiveLicensesTable = document.getElementById('inactiveLicenseList');
+    
+    activeLicensesTable.innerHTML = '';
+    inactiveLicensesTable.innerHTML = '';
 
     try {
         const snapshot = await db.collection('licenses').get();
@@ -90,7 +93,13 @@ async function loadLicenses() {
                     </td>
                 </tr>
             `;
-            licensesTable.innerHTML += row;
+            
+            // Determine if license is active or inactive
+            if (license.status === 'active') {
+                activeLicensesTable.innerHTML += row;
+            } else {
+                inactiveLicensesTable.innerHTML += row;
+            }
         });
     } catch (error) {
         console.error('Error loading licenses:', error);
