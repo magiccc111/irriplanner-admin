@@ -75,6 +75,8 @@ async function loadLicenses() {
     
     activeLicensesTable.innerHTML = '';
     inactiveLicensesTable.innerHTML = '';
+    
+    const currentDate = new Date();
 
     try {
         const snapshot = await db.collection('licenses').get();
@@ -82,13 +84,15 @@ async function loadLicenses() {
             const license = doc.data();
             const activatedDate = license.activatedAt ? license.activatedAt.toDate().toLocaleDateString() : 'Nem aktivált';
             const lastUsedDate = license.lastUsed ? license.lastUsed.toDate().toLocaleDateString() : 'Soha';
+            const expiryDate = license.expiresAt.toDate();
+            const isExpired = expiryDate < currentDate;
             
             const row = `
                 <tr>
                     <td>${doc.id}</td>
                     <td>${license.customerName}</td>
-                    <td>${license.status}</td>
-                    <td>${license.expiresAt.toDate().toLocaleDateString()}</td>
+                    <td>${license.status}${isExpired ? ' (Expired)' : ''}</td>
+                    <td>${expiryDate.toLocaleDateString()}</td>
                     <td>${activatedDate}</td>
                     <td>${lastUsedDate}</td>
                     <td>
@@ -99,7 +103,7 @@ async function loadLicenses() {
             `;
             
             // Determine if license is active or inactive
-            if (license.status === 'active') {
+            if (license.status === 'active' && !isExpired) {
                 activeLicensesTable.innerHTML += row;
             } else {
                 inactiveLicensesTable.innerHTML += row;
