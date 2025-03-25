@@ -75,23 +75,38 @@ async function loadLicenses() {
     
     activeLicensesTable.innerHTML = '';
     inactiveLicensesTable.innerHTML = '';
-    
-    const currentDate = new Date();
 
     try {
         const snapshot = await db.collection('licenses').get();
+        const currentDate = new Date();
+        
         snapshot.forEach(doc => {
             const license = doc.data();
             const activatedDate = license.activatedAt ? license.activatedAt.toDate().toLocaleDateString() : 'Nem aktivált';
             const lastUsedDate = license.lastUsed ? license.lastUsed.toDate().toLocaleDateString() : 'Soha';
             const expiryDate = license.expiresAt.toDate();
-            const isExpired = expiryDate < currentDate;
+            
+            // Check if license is expired or not activated
+            let displayStatus = license.status;
+            let isActive = license.status === 'active';
+            
+            // If expiry date is in the past, consider it inactive
+            if (expiryDate < currentDate && isActive) {
+                displayStatus = 'inactive (expired)';
+                isActive = false;
+            }
+            
+            // If not activated yet, consider it inactive
+            if (!license.activatedAt && isActive) {
+                displayStatus = 'inactive (not activated)';
+                isActive = false;
+            }
             
             const row = `
                 <tr>
                     <td>${doc.id}</td>
                     <td>${license.customerName}</td>
-                    <td>${license.status}${isExpired ? ' (Expired)' : ''}</td>
+                    <td>${displayStatus}</td>
                     <td>${expiryDate.toLocaleDateString()}</td>
                     <td>${activatedDate}</td>
                     <td>${lastUsedDate}</td>
@@ -102,8 +117,8 @@ async function loadLicenses() {
                 </tr>
             `;
             
-            // Determine if license is active or inactive
-            if (license.status === 'active' && !isExpired) {
+            // Determine if license is active or inactive based on our checks
+            if (isActive) {
                 activeLicensesTable.innerHTML += row;
             } else {
                 inactiveLicensesTable.innerHTML += row;
