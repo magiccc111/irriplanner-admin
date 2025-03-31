@@ -16,7 +16,7 @@ function showAdminPanel() {
     document.getElementById('loginForm').classList.add('d-none');
     document.getElementById('adminPanel').classList.remove('d-none');
     loadLicenses();
-    loadAndDisplayCurrentVersion(); // Load current version when admin panel shows
+    loadAndDisplayCurrentVersion();
 }
 
 // Generate new license
@@ -156,13 +156,6 @@ async function deleteLicense(licenseKey) {
     }
 }
 
-// Check auth state
-auth.onAuthStateChanged(user => {
-    if (user) {
-        showAdminPanel();
-    }
-});
-
 // Save the latest application version
 async function saveLatestVersion() {
     const versionInput = document.getElementById('latestVersion');
@@ -216,3 +209,10 @@ function displayCurrentSavedVersion(version) {
         displayElement.textContent = version;
     }
 }
+
+// Check auth state
+auth.onAuthStateChanged(user => {
+    if (user) {
+        showAdminPanel();
+    }
+});
