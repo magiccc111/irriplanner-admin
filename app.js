@@ -16,6 +16,7 @@ function showAdminPanel() {
     document.getElementById('loginForm').classList.add('d-none');
     document.getElementById('adminPanel').classList.remove('d-none');
     loadLicenses();
+    loadAndDisplayCurrentVersion(); // Load current version when admin panel shows
 }
 
 // Generate new license
@@ -161,3 +162,57 @@ auth.onAuthStateChanged(user => {
         showAdminPanel();
     }
 });
+
+// Save the latest application version
+async function saveLatestVersion() {
+    const versionInput = document.getElementById('latestVersion');
+    const latestVersion = versionInput.value.trim();
+
+    if (!latestVersion) {
+        alert('Please enter a version number (e.g., 1.1.0)');
+        return;
+    }
+
+    // Use a specific document for app info, e.g., 'app_info/latest_version'
+    const versionDocRef = db.collection('app_info').doc('latest_version');
+
+    try {
+        await versionDocRef.set({
+            versionNumber: latestVersion,
+            lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true }); // Use merge:true to avoid overwriting other potential fields
+
+        alert(`Latest version saved: ${latestVersion}`);
+        displayCurrentSavedVersion(latestVersion); // Update display immediately
+        versionInput.value = ''; // Clear input after save
+
+    } catch (error) {
+        alert('Error saving version: ' + error.message);
+        console.error('Error saving version:', error);
+    }
+}
+
+// Load and display the current saved version
+async function loadAndDisplayCurrentVersion() {
+    const versionDocRef = db.collection('app_info').doc('latest_version');
+    try {
+        const docSnap = await versionDocRef.get();
+        if (docSnap.exists) {
+            const versionData = docSnap.data();
+            displayCurrentSavedVersion(versionData.versionNumber || '-');
+        } else {
+            displayCurrentSavedVersion('-'); // No version saved yet
+        }
+    } catch (error) {
+        console.error('Error loading current version:', error);
+        displayCurrentSavedVersion('Error');
+    }
+}
+
+// Helper to update the display span
+function displayCurrentSavedVersion(version) {
+    const displayElement = document.getElementById('currentSavedVersion');
+    if (displayElement) {
+        displayElement.textContent = version;
+    }
+}

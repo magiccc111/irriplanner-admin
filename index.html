@@ -25,6 +25,23 @@
         <div id="adminPanel" class="d-none">
             <h2 class="mb-4">License Management</h2>
             
+            <!-- Application Version Control -->
+            <div class="card mb-4 p-3">
+                <h3 class="h5">Application Version</h3>
+                <div class="row align-items-center">
+                    <div class="col-md-6">
+                        <label for="latestVersion" class="form-label">Latest Version:</label>
+                        <input type="text" id="latestVersion" class="form-control mb-2" placeholder="e.g., 1.1.0">
+                    </div>
+                    <div class="col-md-3">
+                        <button onclick="saveLatestVersion()" class="btn btn-info w-100 mt-3">Save Version</button>
+                    </div>
+                    <div class="col-md-3">
+                        <p class="mt-3 mb-0">Current Saved: <strong id="currentSavedVersion">-</strong></p>
+                    </div>
+                </div>
+            </div>
+            
             <!-- Generate License Form -->
             <div class="card mb-4 p-3">
                 <h3 class="h5">Generate New License</h3>
