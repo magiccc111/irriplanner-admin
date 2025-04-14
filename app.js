@@ -12,12 +12,11 @@ async function login() {
 }
 
 // Show admin panel after successful login
-async function showAdminPanel() {
-    document.getElementById('loginForm').style.display = 'none';
-    document.getElementById('adminPanel').style.display = 'block';
-    await loadLicenses();
-    await loadAndDisplayCurrentVersion();
-    await updateStatistics();
+function showAdminPanel() {
+    document.getElementById('loginForm').classList.add('d-none');
+    document.getElementById('adminPanel').classList.remove('d-none');
+    loadLicenses();
+    loadAndDisplayCurrentVersion();
 }
 
 // Generate new license
@@ -48,7 +47,6 @@ async function generateLicense() {
 
         alert(`License generated: ${licenseKey}`);
         loadLicenses();
-        await updateStatistics();
     } catch (error) {
         alert('Error generating license: ' + error.message);
     }
@@ -140,7 +138,6 @@ async function revokeLicense(licenseKey) {
                 status: 'revoked'
             });
             loadLicenses();
-            await updateStatistics();
         } catch (error) {
             alert('Error revoking license: ' + error.message);
         }
@@ -153,7 +150,6 @@ async function deleteLicense(licenseKey) {
         try {
             await db.collection('licenses').doc(licenseKey).delete();
             loadLicenses();
-            await updateStatistics();
         } catch (error) {
             alert('Hiba a licensz törlésekor: ' + error.message);
         }
@@ -220,109 +216,3 @@ auth.onAuthStateChanged(user => {
         showAdminPanel();
     }
 });
-
-// Chart.js script betöltése
-const chartScript = document.createElement('script');
-chartScript.src = 'https://cdn.jsdelivr.net/npm/chart.js';
-document.head.appendChild(chartScript);
-
-let licenseChart;
-let userTypeChart;
-
-async function updateStatistics() {
-    const licensesSnapshot = await db.collection('licenses').get();
-    const usageSnapshot = await db.collection('usage_stats').get();
-    const now = new Date();
-    
-    let totalLicenses = 0;
-    let activeLicenses = 0;
-    let expiredLicenses = 0;
-    let unlicensedUsers = 0;
-    
-    // Count licensed users
-    licensesSnapshot.forEach(doc => {
-        const license = doc.data();
-        totalLicenses++;
-        
-        const expirationDate = new Date(license.expiresAt);
-        if (expirationDate > now && license.status === 'active') {
-            activeLicenses++;
-        } else {
-            expiredLicenses++;
-        }
-    });
-    
-    // Count unlicensed users from usage stats
-    usageSnapshot.forEach(doc => {
-        const usage = doc.data();
-        if (!usage.licenseKey) {
-            unlicensedUsers++;
-        }
-    });
-    
-    // Update statistics display
-    document.getElementById('totalLicenses').textContent = totalLicenses;
-    document.getElementById('activeLicenses').textContent = activeLicenses;
-    document.getElementById('expiredLicenses').textContent = expiredLicenses;
-    document.getElementById('unlicensedUsers').textContent = unlicensedUsers;
-    
-    // Update charts
-    updateLicenseChart(activeLicenses, expiredLicenses);
-    updateUserTypeChart(activeLicenses, unlicensedUsers);
-}
-
-function updateLicenseChart(active, expired) {
-    const ctx = document.getElementById('licenseChart').getContext('2d');
-    
-    if (licenseChart) {
-        licenseChart.destroy();
-    }
-    
-    licenseChart = new Chart(ctx, {
-        type: 'pie',
-        data: {
-            labels: ['Aktív Licenszek', 'Lejárt Licenszek'],
-            datasets: [{
-                data: [active, expired],
-                backgroundColor: ['#28a745', '#dc3545']
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                title: {
-                    display: true,
-                    text: 'Licenszek Megoszlása'
-                }
-            }
-        }
-    });
-}
-
-function updateUserTypeChart(licensed, unlicensed) {
-    const ctx = document.getElementById('userTypeChart').getContext('2d');
-    
-    if (userTypeChart) {
-        userTypeChart.destroy();
-    }
-    
-    userTypeChart = new Chart(ctx, {
-        type: 'pie',
-        data: {
-            labels: ['Licenszelt Felhasználók', 'Nem Licenszelt Felhasználók'],
-            datasets: [{
-                data: [licensed, unlicensed],
-                backgroundColor: ['#28a745', '#ffc107']
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                title: {
-                    display: true,
-                    text: 'Felhasználók Megoszlása'
-                }
-            }
-        }
-    });
-}
