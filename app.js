@@ -17,7 +17,7 @@ function showAdminPanel() {
     document.getElementById('adminPanel').classList.remove('d-none');
     loadLicenses();
     loadAndDisplayCurrentVersion();
-    loadMachineUsageStats();
+    loadUsageStats(); // Load usage statistics
 }
 
 // Generate new license
@@ -211,212 +211,64 @@ function displayCurrentSavedVersion(version) {
     }
 }
 
-// Load machine usage statistics for the last 7 days
-async function loadMachineUsageStats() {
-    // Get date range (last 7 days)
-    const dates = getLast7Days();
-    const machineStatsDiv = document.getElementById('machineUsageStats');
-    
-    // Clear previous data
-    machineStatsDiv.innerHTML = '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>';
-    
+// Load usage statistics
+async function loadUsageStats() {
     try {
-        // Track all unique machines
-        let allUniqueMachines = new Set();
-        let uniqueMachinesByDay = {};
-        let uniqueMachinesByLicense = {};
+        // Get current date and date 7 days ago
+        const now = new Date();
+        const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
         
-        // Load data for each day
-        const promises = dates.map(async (date) => {
-            const docRef = db.collection('machine_usage').doc(date);
-            const docSnap = await docRef.get();
-            
-            if (docSnap.exists) {
-                const data = docSnap.data();
-                uniqueMachinesByDay[date] = new Set();
-                
-                // Process each license's machine IDs
-                for (const [licenseKey, machineIds] of Object.entries(data)) {
-                    if (licenseKey === 'timestamp') continue;
-                    
-                    // Initialize license tracker if not exists
-                    if (!uniqueMachinesByLicense[licenseKey]) {
-                        uniqueMachinesByLicense[licenseKey] = new Set();
-                    }
-                    
-                    // Add machine IDs to sets
-                    machineIds.forEach(machineId => {
-                        allUniqueMachines.add(machineId);
-                        uniqueMachinesByDay[date].add(machineId);
-                        uniqueMachinesByLicense[licenseKey].add(machineId);
-                    });
-                }
+        // Query usage stats from the last 7 days
+        const snapshot = await db.collection('usage_stats')
+            .where('timestamp', '>=', sevenDaysAgo)
+            .get();
+
+        // Get today's start timestamp
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+
+        // Process the data
+        const uniqueMachines = new Set();
+        const licensedMachines = new Set();
+        const freeMachines = new Set();
+        const todayActiveMachines = new Set();
+
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            const machineId = data.machineId;
+            const timestamp = data.timestamp.toDate();
+
+            // Add to unique machines
+            uniqueMachines.add(machineId);
+
+            // Add to licensed or free machines
+            if (data.isLicensed) {
+                licensedMachines.add(machineId);
             } else {
-                uniqueMachinesByDay[date] = new Set(); // Empty set for days with no data
+                freeMachines.add(machineId);
+            }
+
+            // Check if used today
+            if (timestamp >= todayStart) {
+                todayActiveMachines.add(machineId);
             }
         });
-        
-        // Wait for all promises to resolve
-        await Promise.all(promises);
-        
-        // Prepare chart data
-        const chartLabels = dates.map(date => formatDate(date, true));
-        const chartData = dates.map(date => uniqueMachinesByDay[date].size);
-        
-        // Build the HTML for the statistics
-        let statsHTML = `
-            <div class="card p-3 mb-3">
-                <h4>Összesítés (elmúlt 7 nap)</h4>
-                <p>Összes egyedi számítógép: <strong>${allUniqueMachines.size}</strong></p>
-            </div>
-            
-            <div class="card p-3 mb-3">
-                <h4>Napi használat</h4>
-                <canvas id="dailyUsageChart" width="400" height="200"></canvas>
-            </div>
-            
-            <div class="card p-3 mb-3">
-                <h4>Napi bontás</h4>
-                <div class="table-responsive">
-                    <table class="table table-striped">
-                        <thead>
-                            <tr>
-                                <th>Dátum</th>
-                                <th>Egyedi számítógépek</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-        `;
-        
-        dates.forEach(date => {
-            statsHTML += `
-                <tr>
-                    <td>${formatDate(date)}</td>
-                    <td>${uniqueMachinesByDay[date].size}</td>
-                </tr>
-            `;
-        });
-        
-        statsHTML += `
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            
-            <div class="card p-3">
-                <h4>Licenszek szerinti bontás</h4>
-                <div class="table-responsive">
-                    <table class="table table-striped">
-                        <thead>
-                            <tr>
-                                <th>Licensz kulcs</th>
-                                <th>Egyedi számítógépek</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-        `;
-        
-        // Add unlicensed users first with highlighting if they exist
-        if (uniqueMachinesByLicense['unlicensed']) {
-            const unlicensedCount = uniqueMachinesByLicense['unlicensed'].size;
-            statsHTML += `
-                <tr class="table-warning">
-                    <td><strong>Nem licenszelt felhasználók</strong></td>
-                    <td>${unlicensedCount}</td>
-                </tr>
-            `;
-        }
-        
-        // Then add all other license keys
-        for (const [licenseKey, machines] of Object.entries(uniqueMachinesByLicense)) {
-            // Skip unlicensed as we already added it
-            if (licenseKey === 'unlicensed') continue;
-            
-            statsHTML += `
-                <tr>
-                    <td>${licenseKey}</td>
-                    <td>${machines.size}</td>
-                </tr>
-            `;
-        }
-        
-        statsHTML += `
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        `;
-        
-        machineStatsDiv.innerHTML = statsHTML;
-        
-        // Create chart
-        createDailyUsageChart(chartLabels, chartData);
-        
+
+        // Update the display
+        document.getElementById('totalUniqueUsers').textContent = uniqueMachines.size;
+        document.getElementById('licensedUsers').textContent = licensedMachines.size;
+        document.getElementById('freeUsers').textContent = freeMachines.size;
+        document.getElementById('todayActiveUsers').textContent = todayActiveMachines.size;
+
     } catch (error) {
-        console.error('Error loading machine usage stats:', error);
-        machineStatsDiv.innerHTML = `<div class="alert alert-danger">Hiba a statisztikák betöltésekor: ${error.message}</div>`;
+        console.error('Error loading usage stats:', error);
+        alert('Error loading usage statistics: ' + error.message);
     }
 }
 
-// Function to create the daily usage chart
-function createDailyUsageChart(labels, data) {
-    const ctx = document.getElementById('dailyUsageChart');
-    
-    // Check if chart instance already exists and destroy it
-    if (window.dailyChart) {
-        window.dailyChart.destroy();
-    }
-    
-    // Create new chart
-    window.dailyChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Napi egyedi számítógépek',
-                data: data,
-                backgroundColor: 'rgba(54, 162, 235, 0.6)',
-                borderColor: 'rgba(54, 162, 235, 1)',
-                borderWidth: 1
-            }]
-        },
-        options: {
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        precision: 0
-                    }
-                }
-            },
-            plugins: {
-                legend: {
-                    display: false
-                }
-            }
-        }
-    });
-}
-
-// Helper function to get dates for the last 7 days
-function getLast7Days() {
-    const dates = [];
-    for (let i = 0; i < 7; i++) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        dates.push(date.toISOString().split('T')[0]); // Format: YYYY-MM-DD
-    }
-    return dates.reverse(); // Reverse to show oldest to newest
-}
-
-// Helper function to format dates for display
-function formatDate(dateString, short = false) {
-    if (short) {
-        const options = { month: 'short', day: 'numeric' };
-        return new Date(dateString).toLocaleDateString('hu-HU', options);
-    }
-    const options = { year: 'numeric', month: 'long', day: 'numeric' };
-    return new Date(dateString).toLocaleDateString('hu-HU', options);
+// Refresh usage statistics
+function refreshUsageStats() {
+    loadUsageStats();
 }
 
 // Check auth state
