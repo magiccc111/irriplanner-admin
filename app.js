@@ -1,3 +1,38 @@
+// EmailJS inicializálása
+(function() {
+    // Ellenőrizzük, hogy a konfiguráció be van-e töltve
+    if (typeof EMAILJS_CONFIG !== 'undefined' && EMAILJS_CONFIG.PUBLIC_KEY !== 'your_public_key') {
+        emailjs.init(EMAILJS_CONFIG.PUBLIC_KEY);
+    } else {
+        console.warn('EmailJS konfiguráció hiányzik vagy nem megfelelő. Kérjük, állítsa be az emailjs-config.js fájlban.');
+    }
+})();
+
+// Email küldése licensz kulccsal
+async function sendLicenseEmail(customerName, customerEmail, licenseKey, expiryDate) {
+    // Ellenőrizzük a konfigurációt
+    if (typeof EMAILJS_CONFIG === 'undefined' || EMAILJS_CONFIG.PUBLIC_KEY === 'your_public_key') {
+        throw new Error('EmailJS konfiguráció hiányzik. Kérjük, állítsa be az emailjs-config.js fájlban.');
+    }
+
+    const templateParams = {
+        to_name: customerName,
+        to_email: customerEmail,
+        license_key: licenseKey,
+        expiry_date: expiryDate.toLocaleDateString('hu-HU'),
+        company_name: 'IrriPlanner'
+    };
+
+    try {
+        const response = await emailjs.send(EMAILJS_CONFIG.SERVICE_ID, EMAILJS_CONFIG.TEMPLATE_ID, templateParams);
+        console.log('Email sikeresen elküldve:', response.status, response.text);
+        return true;
+    } catch (error) {
+        console.error('Email küldési hiba:', error);
+        throw error;
+    }
+}
+
 // Login function
 async function login() {
     const email = document.getElementById('email').value;
@@ -25,9 +60,10 @@ async function generateLicense() {
     const customerName = document.getElementById('customerName').value;
     const customerEmail = document.getElementById('customerEmail').value;
     const months = parseInt(document.getElementById('validityMonths').value);
+    const sendEmail = document.getElementById('sendEmailNotification').checked;
 
     if (!customerName || !customerEmail || !months) {
-        alert('Please fill all fields');
+        alert('Kérjük, töltse ki az összes mezőt');
         return;
     }
 
@@ -36,6 +72,7 @@ async function generateLicense() {
     expiryDate.setMonth(expiryDate.getMonth() + months);
 
     try {
+        // Licensz mentése az adatbázisba
         await db.collection('licenses').doc(licenseKey).set({
             customerName,
             customerEmail,
@@ -46,10 +83,25 @@ async function generateLicense() {
             lastUsed: null
         });
 
-        alert(`License generated: ${licenseKey}`);
+        // Email küldése, ha be van jelölve
+        if (sendEmail) {
+            try {
+                await sendLicenseEmail(customerName, customerEmail, licenseKey, expiryDate);
+                alert(`Licensz generálva és email elküldve: ${licenseKey}`);
+            } catch (emailError) {
+                alert(`Licensz generálva: ${licenseKey}\nEmail küldési hiba: ${emailError.message}`);
+            }
+        } else {
+            alert(`Licensz generálva: ${licenseKey}`);
+        }
+
+        // Mezők törlése és lista frissítése
+        document.getElementById('customerName').value = '';
+        document.getElementById('customerEmail').value = '';
+        document.getElementById('validityMonths').value = '1';
         loadLicenses();
     } catch (error) {
-        alert('Error generating license: ' + error.message);
+        alert('Hiba a licensz generálásakor: ' + error.message);
     }
 }
 

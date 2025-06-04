@@ -101,6 +101,16 @@
                         <button onclick="generateLicense()" class="btn btn-success w-100">Generate</button>
                     </div>
                 </div>
+                <div class="row mt-2">
+                    <div class="col-md-12">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="sendEmailNotification" checked>
+                            <label class="form-check-label" for="sendEmailNotification">
+                                Email küldése a licensz kulccsal az ügyfélnek
+                            </label>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Active Licenses -->
@@ -156,8 +166,12 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
     
+    <!-- EmailJS -->
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+    
     <!-- Custom JS -->
     <script src="config.js"></script>
+    <script src="emailjs-config.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
