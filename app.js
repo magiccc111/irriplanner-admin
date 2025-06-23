@@ -362,21 +362,44 @@ async function loadMachineList() {
             }
         });
 
-        // Get license information
+        // Get license information for name mapping
         const licensesSnapshot = await db.collection('licenses').get();
         const licenseMap = {};
 
         licensesSnapshot.forEach(doc => {
+            const licenseKey = doc.id;
             const license = doc.data();
-            // We'll need to match this with machine IDs somehow
-            // For now, we'll show machine IDs without names unless there's a direct match
+            licenseMap[licenseKey] = {
+                customerName: license.customerName,
+                customerEmail: license.customerEmail,
+                status: license.status
+            };
         });
 
         // Convert to array and sort by last activity
-        const machines = Object.values(machineData).map(machine => ({
-            ...machine,
-            sessionCount: machine.sessionCount.size
-        })).sort((a, b) => b.lastActivity - a.lastActivity);
+        const machines = Object.values(machineData).map(machine => {
+            // Find license info for this machine
+            let licenseInfo = null;
+            for (const [licenseKey, info] of Object.entries(licenseMap)) {
+                // Check if this machine has used this license key in any event
+                const hasLicense = eventsSnapshot.docs.some(doc => {
+                    const data = doc.data();
+                    return data.machine_id === machine.machineId && 
+                           data.details && 
+                           data.details.license_key === licenseKey;
+                });
+                if (hasLicense) {
+                    licenseInfo = info;
+                    break;
+                }
+            }
+            
+            return {
+                ...machine,
+                sessionCount: machine.sessionCount.size,
+                licenseInfo: licenseInfo
+            };
+        }).sort((a, b) => b.lastActivity - a.lastActivity);
 
         // Render machine list
         let html = '';
@@ -384,13 +407,26 @@ async function loadMachineList() {
             const lastActivityStr = machine.lastActivity.toLocaleDateString('hu-HU') + ' ' + 
                                    machine.lastActivity.toLocaleTimeString('hu-HU');
             
+            // Display name and license info
+            const displayName = machine.licenseInfo ? 
+                `${machine.licenseInfo.customerName} (${machine.machineId.substring(0, 8)}...)` : 
+                `${machine.machineId.substring(0, 8)}...`;
+            
+            const licenseStatus = machine.licenseInfo ? 
+                `<span class="badge bg-success">Licensed</span>` : 
+                `<span class="badge bg-secondary">Free User</span>`;
+            
             html += `
                 <div class="list-group-item list-group-item-action" onclick="loadUserSessions('${machine.machineId}')">
                     <div class="d-flex w-100 justify-content-between">
-                        <h6 class="mb-1">${machine.machineId.substring(0, 8)}...</h6>
+                        <h6 class="mb-1">${displayName}</h6>
                         <small>${lastActivityStr}</small>
                     </div>
-                    <p class="mb-1">Sessions: ${machine.sessionCount} | ${machine.os} | v${machine.appVersion}</p>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <small>Sessions: ${machine.sessionCount} | ${machine.os} | v${machine.appVersion}</small>
+                        ${licenseStatus}
+                    </div>
+                    ${machine.licenseInfo ? `<small class="text-muted">${machine.licenseInfo.customerEmail}</small>` : ''}
                 </div>
             `;
         });
