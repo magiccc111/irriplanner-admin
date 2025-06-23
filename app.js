@@ -323,9 +323,270 @@ function refreshUsageStats() {
     loadUsageStats();
 }
 
+// === ANALYTICS FUNCTIONS ===
+
+// Load machine list with user information
+async function loadMachineList() {
+    const machineListDiv = document.getElementById('machineList');
+    machineListDiv.innerHTML = '<div class="text-center p-3"><div class="spinner-border spinner-border-sm"></div> Betöltés...</div>';
+
+    try {
+        // Get all user events to find unique machine IDs
+        const eventsSnapshot = await db.collection('user_events').get();
+        const machineData = {};
+
+        // Collect machine IDs and their latest activity
+        eventsSnapshot.forEach(doc => {
+            const data = doc.data();
+            const machineId = data.machine_id;
+            const timestamp = data.timestamp?.toDate?.() || new Date(data.timestamp);
+
+            if (!machineData[machineId]) {
+                machineData[machineId] = {
+                    machineId,
+                    lastActivity: timestamp,
+                    sessionCount: new Set(),
+                    appVersion: data.app_version || 'unknown',
+                    os: data.os || 'unknown'
+                };
+            }
+
+            // Update last activity if this event is newer
+            if (timestamp > machineData[machineId].lastActivity) {
+                machineData[machineId].lastActivity = timestamp;
+            }
+
+            // Track unique sessions
+            if (data.session_id) {
+                machineData[machineId].sessionCount.add(data.session_id);
+            }
+        });
+
+        // Get license information
+        const licensesSnapshot = await db.collection('licenses').get();
+        const licenseMap = {};
+
+        licensesSnapshot.forEach(doc => {
+            const license = doc.data();
+            // We'll need to match this with machine IDs somehow
+            // For now, we'll show machine IDs without names unless there's a direct match
+        });
+
+        // Convert to array and sort by last activity
+        const machines = Object.values(machineData).map(machine => ({
+            ...machine,
+            sessionCount: machine.sessionCount.size
+        })).sort((a, b) => b.lastActivity - a.lastActivity);
+
+        // Render machine list
+        let html = '';
+        machines.forEach(machine => {
+            const lastActivityStr = machine.lastActivity.toLocaleDateString('hu-HU') + ' ' + 
+                                   machine.lastActivity.toLocaleTimeString('hu-HU');
+            
+            html += `
+                <div class="list-group-item list-group-item-action" onclick="loadUserSessions('${machine.machineId}')">
+                    <div class="d-flex w-100 justify-content-between">
+                        <h6 class="mb-1">${machine.machineId.substring(0, 8)}...</h6>
+                        <small>${lastActivityStr}</small>
+                    </div>
+                    <p class="mb-1">Sessions: ${machine.sessionCount} | ${machine.os} | v${machine.appVersion}</p>
+                </div>
+            `;
+        });
+
+        machineListDiv.innerHTML = html || '<div class="text-muted p-3">Nincs adat</div>';
+
+    } catch (error) {
+        console.error('Error loading machine list:', error);
+        machineListDiv.innerHTML = '<div class="text-danger p-3">Hiba az adatok betöltésekor</div>';
+    }
+}
+
+// Load sessions for a specific machine ID
+async function loadUserSessions(machineId) {
+    const sessionDetailsDiv = document.getElementById('sessionDetails');
+    sessionDetailsDiv.innerHTML = '<div class="text-center p-3"><div class="spinner-border spinner-border-sm"></div> Betöltés...</div>';
+
+    try {
+        // Get all events for this machine ID
+        const eventsSnapshot = await db.collection('user_events')
+            .where('machine_id', '==', machineId)
+            .orderBy('timestamp', 'desc')
+            .get();
+
+        const sessions = {};
+
+        // Group events by session ID
+        eventsSnapshot.forEach(doc => {
+            const data = doc.data();
+            const sessionId = data.session_id;
+            const timestamp = data.timestamp?.toDate?.() || new Date(data.timestamp);
+
+            if (!sessions[sessionId]) {
+                sessions[sessionId] = {
+                    sessionId,
+                    events: [],
+                    startTime: timestamp,
+                    endTime: timestamp,
+                    duration: 0
+                };
+            }
+
+            sessions[sessionId].events.push({
+                ...data,
+                timestamp
+            });
+
+            // Update session time bounds
+            if (timestamp < sessions[sessionId].startTime) {
+                sessions[sessionId].startTime = timestamp;
+            }
+            if (timestamp > sessions[sessionId].endTime) {
+                sessions[sessionId].endTime = timestamp;
+            }
+        });
+
+        // Calculate durations and sort events within sessions
+        Object.values(sessions).forEach(session => {
+            session.duration = Math.round((session.endTime - session.startTime) / 1000); // seconds
+            session.events.sort((a, b) => a.timestamp - b.timestamp);
+        });
+
+        // Convert to array and sort by start time
+        const sessionArray = Object.values(sessions).sort((a, b) => b.startTime - a.startTime);
+
+        // Render sessions
+        let html = `<h6>Machine ID: ${machineId}</h6>`;
+        html += `<p class="text-muted">Összes session: ${sessionArray.length}</p>`;
+
+        sessionArray.forEach((session, index) => {
+            const startTimeStr = session.startTime.toLocaleDateString('hu-HU') + ' ' + 
+                                 session.startTime.toLocaleTimeString('hu-HU');
+            const durationStr = formatDuration(session.duration);
+            
+            // Get key events summary
+            const keyEvents = session.events.filter(e => 
+                ['session_start', 'session_end', 'polygon_created', 'sprinkler_type_selected', 'button_click'].includes(e.event_name)
+            );
+
+            html += `
+                <div class="card mb-2">
+                    <div class="card-body p-2">
+                        <div class="d-flex justify-content-between">
+                            <small><strong>Session ${index + 1}</strong></small>
+                            <small>${startTimeStr}</small>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <small>Időtartam: ${durationStr}</small>
+                            <small>Események: ${session.events.length}</small>
+                        </div>
+                        <div class="mt-1">
+                            <button class="btn btn-sm btn-outline-primary" onclick="showSessionEvents('${session.sessionId}', '${machineId}')">
+                                Részletek
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        sessionDetailsDiv.innerHTML = html;
+
+    } catch (error) {
+        console.error('Error loading user sessions:', error);
+        sessionDetailsDiv.innerHTML = '<div class="text-danger p-3">Hiba az adatok betöltésekor</div>';
+    }
+}
+
+// Show detailed events for a session
+async function showSessionEvents(sessionId, machineId) {
+    const modal = new bootstrap.Modal(document.getElementById('sessionEventsModal'));
+    const eventsListDiv = document.getElementById('sessionEventsList');
+    
+    eventsListDiv.innerHTML = '<div class="text-center p-3"><div class="spinner-border"></div> Betöltés...</div>';
+    modal.show();
+
+    try {
+        // Get all events for this session
+        const eventsSnapshot = await db.collection('user_events')
+            .where('machine_id', '==', machineId)
+            .where('session_id', '==', sessionId)
+            .orderBy('timestamp', 'asc')
+            .get();
+
+        const events = [];
+        eventsSnapshot.forEach(doc => {
+            const data = doc.data();
+            events.push({
+                ...data,
+                timestamp: data.timestamp?.toDate?.() || new Date(data.timestamp)
+            });
+        });
+
+        // Render events timeline
+        let html = `<h6>Session: ${sessionId.substring(0, 8)}...</h6>`;
+        html += `<p class="text-muted">Machine: ${machineId}</p>`;
+        html += '<div class="timeline">';
+
+        events.forEach((event, index) => {
+            const timeStr = event.timestamp.toLocaleTimeString('hu-HU');
+            const eventTypeClass = getEventTypeClass(event.event_type);
+            
+            html += `
+                <div class="timeline-item mb-3">
+                    <div class="d-flex">
+                        <div class="timeline-marker ${eventTypeClass}"></div>
+                        <div class="timeline-content ms-3">
+                            <div class="d-flex justify-content-between">
+                                <strong>${event.event_name}</strong>
+                                <small class="text-muted">${timeStr}</small>
+                            </div>
+                            <div class="text-muted">${event.event_type}</div>
+                            ${event.details ? `<small class="text-secondary">${JSON.stringify(event.details, null, 2)}</small>` : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += '</div>';
+        eventsListDiv.innerHTML = html;
+
+    } catch (error) {
+        console.error('Error loading session events:', error);
+        eventsListDiv.innerHTML = '<div class="text-danger p-3">Hiba az adatok betöltésekor</div>';
+    }
+}
+
+// Helper functions
+function formatDuration(seconds) {
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}m ${remainingSeconds}s`;
+}
+
+function getEventTypeClass(eventType) {
+    const classes = {
+        'lifecycle': 'bg-success',
+        'action': 'bg-primary',
+        'error': 'bg-danger',
+        'barrier': 'bg-warning',
+        'workflow': 'bg-info'
+    };
+    return classes[eventType] || 'bg-secondary';
+}
+
 // Check auth state
 auth.onAuthStateChanged(user => {
     if (user) {
         showAdminPanel();
+        // Load machine list on admin panel load
+        setTimeout(() => {
+            if (document.getElementById('machineList')) {
+                loadMachineList();
+            }
+        }, 1000);
     }
 });
