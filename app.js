@@ -12,11 +12,27 @@
 class FirebaseCache {
     constructor() {
         this.CACHE_DURATION = 30 * 60 * 1000; // 30 perc milliszekundumban
+        this.CACHE_VERSION = 'v1.1'; // ✅ Cache verzió a hibás cache-ek törléséhez
         this.CACHE_KEYS = {
             USER_EVENTS: 'firebase_cache_user_events',
             USAGE_STATS: 'firebase_cache_usage_stats',
             LICENSES: 'firebase_cache_licenses'
         };
+        
+        // ✅ Verzió ellenőrzés és hibás cache-ek törlése
+        this.checkAndClearOldCache();
+    }
+
+    // ✅ Régi cache verzió törlése
+    checkAndClearOldCache() {
+        const currentVersion = localStorage.getItem('firebase_cache_version');
+        if (currentVersion !== this.CACHE_VERSION) {
+            console.log(`🔄 Cache version mismatch - clearing old cache data (${currentVersion} → ${this.CACHE_VERSION})`);
+            this.cleanup();
+            localStorage.setItem('firebase_cache_version', this.CACHE_VERSION);
+        } else {
+            console.log(`✅ Cache version OK: ${this.CACHE_VERSION}`);
+        }
     }
 
     // Cache adatok lekérése
@@ -99,6 +115,26 @@ class FirebaseCache {
 
 // Globális cache instance
 const firebaseCache = new FirebaseCache();
+
+// ✅ Helper funkció a biztonságos Date konverzióhoz
+function safeToDate(timestamp) {
+    try {
+        if (timestamp instanceof Date) {
+            return timestamp;
+        }
+        if (timestamp && timestamp.toDate && typeof timestamp.toDate === 'function') {
+            return timestamp.toDate();
+        }
+        if (timestamp) {
+            const date = new Date(timestamp);
+            return isNaN(date.getTime()) ? new Date() : date;
+        }
+        return new Date();
+    } catch (error) {
+        console.warn('Date conversion error:', error, 'Using current date as fallback');
+        return new Date();
+    }
+}
 
 // Email küldése licensz kulccsal
 async function sendLicenseEmail(customerName, customerEmail, licenseKey, expiryDate) {
@@ -369,6 +405,12 @@ async function loadUsageStats() {
             usageData = cachedUsageStats;
             isFromCache = true;
             console.log('📦 Using cached usage stats');
+            
+            // ✅ FIX: Timestamp string-ek visszaalakítása Date objektumokká
+            usageData = usageData.map(record => ({
+                ...record,
+                timestamp: safeToDate(record.timestamp)
+            }));
         } else {
             // ✅ 2. FIREBASE LEKÉRÉS
             console.log('🔄 Loading fresh usage stats from Firebase...');
@@ -385,7 +427,7 @@ async function loadUsageStats() {
             usageData = snapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data(),
-                timestamp: doc.data().timestamp?.toDate?.() || new Date(doc.data().timestamp)
+                timestamp: safeToDate(doc.data().timestamp)
             }));
 
             // ✅ 3. CACHE MENTÉS
@@ -467,6 +509,12 @@ async function loadMachineList() {
             licenseData = cachedLicenses;
             isFromCache = true;
             console.log('📦 Using cached data for machine list');
+            
+            // ✅ FIX: Timestamp string-ek visszaalakítása Date objektumokká
+            eventsData = eventsData.map(event => ({
+                ...event,
+                timestamp: safeToDate(event.timestamp)
+            }));
         } else {
             // ✅ 2. FIREBASE LEKÉRÉS - ÖSSZES ADAT (nem limitált!)
             console.log('🔄 Loading fresh data from Firebase...');
@@ -483,7 +531,7 @@ async function loadMachineList() {
             eventsData = eventsSnapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data(),
-                timestamp: doc.data().timestamp?.toDate?.() || new Date(doc.data().timestamp)
+                timestamp: safeToDate(doc.data().timestamp)
             }));
 
             licenseData = {};
@@ -624,7 +672,7 @@ async function loadUserSessions(machineId) {
         eventsSnapshot.forEach(doc => {
             const data = doc.data();
             const sessionId = data.session_id;
-            const timestamp = data.timestamp?.toDate?.() || new Date(data.timestamp);
+            const timestamp = safeToDate(data.timestamp);
 
             if (!sessions[sessionId]) {
                 sessions[sessionId] = {
@@ -730,7 +778,7 @@ async function showSessionEvents(sessionId, machineId) {
             const data = doc.data();
             events.push({
                 ...data,
-                timestamp: data.timestamp?.toDate?.() || new Date(data.timestamp)
+                timestamp: safeToDate(data.timestamp)
             });
         });
 
