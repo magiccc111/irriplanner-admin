@@ -8,6 +8,98 @@
     }
 })();
 
+// ✅ CACHE KEZELŐ RENDSZER
+class FirebaseCache {
+    constructor() {
+        this.CACHE_DURATION = 30 * 60 * 1000; // 30 perc milliszekundumban
+        this.CACHE_KEYS = {
+            USER_EVENTS: 'firebase_cache_user_events',
+            USAGE_STATS: 'firebase_cache_usage_stats',
+            LICENSES: 'firebase_cache_licenses'
+        };
+    }
+
+    // Cache adatok lekérése
+    get(key) {
+        try {
+            const cached = localStorage.getItem(key);
+            if (!cached) return null;
+
+            const data = JSON.parse(cached);
+            const now = new Date().getTime();
+            
+            // Ellenőrizzük, hogy lejárt-e a cache
+            if (now - data.timestamp > this.CACHE_DURATION) {
+                localStorage.removeItem(key);
+                return null;
+            }
+
+            console.log(`📦 Cache HIT: ${key} (${((now - data.timestamp) / 1000 / 60).toFixed(1)} perc régi)`);
+            return data.value;
+        } catch (error) {
+            console.error('Cache read error:', error);
+            return null;
+        }
+    }
+
+    // Adatok mentése cache-be
+    set(key, value) {
+        try {
+            const data = {
+                timestamp: new Date().getTime(),
+                value: value
+            };
+            localStorage.setItem(key, JSON.stringify(data));
+            console.log(`💾 Cache SAVED: ${key} (${value.length || Object.keys(value).length} items)`);
+        } catch (error) {
+            console.error('Cache write error:', error);
+            // Ha nincs hely, töröljük a legrégebbi cache-eket
+            this.cleanup();
+        }
+    }
+
+    // Cache tisztítás
+    cleanup() {
+        Object.values(this.CACHE_KEYS).forEach(key => {
+            localStorage.removeItem(key);
+        });
+        console.log('🧹 Cache cleared');
+    }
+
+    // Cache frissítés kényszerítése
+    forceRefresh(key) {
+        localStorage.removeItem(key);
+        console.log(`🔄 Cache INVALIDATED: ${key}`);
+    }
+
+    // Cache státusz lekérése
+    getStatus() {
+        const status = {};
+        Object.entries(this.CACHE_KEYS).forEach(([name, key]) => {
+            const cached = localStorage.getItem(key);
+            if (cached) {
+                try {
+                    const data = JSON.parse(cached);
+                    const age = (new Date().getTime() - data.timestamp) / 1000 / 60; // perc
+                    status[name] = {
+                        age: age.toFixed(1) + ' perc',
+                        size: new Blob([cached]).size,
+                        valid: age < (this.CACHE_DURATION / 1000 / 60)
+                    };
+                } catch (e) {
+                    status[name] = { error: 'Invalid cache data' };
+                }
+            } else {
+                status[name] = { status: 'Not cached' };
+            }
+        });
+        return status;
+    }
+}
+
+// Globális cache instance
+const firebaseCache = new FirebaseCache();
+
 // Email küldése licensz kulccsal
 async function sendLicenseEmail(customerName, customerEmail, licenseKey, expiryDate) {
     // Ellenőrizzük a konfigurációt
@@ -266,51 +358,79 @@ function displayCurrentSavedVersion(version) {
 // Load usage statistics
 async function loadUsageStats() {
     try {
-        // Get current date and date 7 days ago
-        const now = new Date();
-        const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
-        
-        // Query usage stats from the last 7 days
-        const snapshot = await db.collection('usage_stats')
-            .where('timestamp', '>=', sevenDaysAgo)
-            .get();
+        let usageData = null;
+        let isFromCache = false;
 
-        // Get today's start timestamp
+        // ✅ 1. CACHE ELLENŐRZÉS - USAGE STATS
+        const cachedUsageStats = firebaseCache.get(firebaseCache.CACHE_KEYS.USAGE_STATS);
+
+        if (cachedUsageStats) {
+            // Van érvényes cache
+            usageData = cachedUsageStats;
+            isFromCache = true;
+            console.log('📦 Using cached usage stats');
+        } else {
+            // ✅ 2. FIREBASE LEKÉRÉS
+            console.log('🔄 Loading fresh usage stats from Firebase...');
+            
+            const now = new Date();
+            const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+            
+            const snapshot = await db.collection('usage_stats')
+                .where('timestamp', '>=', sevenDaysAgo)
+                .orderBy('timestamp', 'desc')
+                .get(); // Eltávolítottuk a limit-et a teljes adat eléréséhez
+
+            // Adatok átalakítása cache-eléshez
+            usageData = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data(),
+                timestamp: doc.data().timestamp?.toDate?.() || new Date(doc.data().timestamp)
+            }));
+
+            // ✅ 3. CACHE MENTÉS
+            firebaseCache.set(firebaseCache.CACHE_KEYS.USAGE_STATS, usageData);
+        }
+
+        // ✅ 4. ADATFELDOLGOZÁS
+        const now = new Date();
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
 
-        // Process the data
         const uniqueMachines = new Set();
         const licensedMachines = new Set();
         const freeMachines = new Set();
         const todayActiveMachines = new Set();
 
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            const machineId = data.machineId;
-            const timestamp = data.timestamp.toDate();
+        usageData.forEach(record => {
+            const machineId = record.machineId;
+            const timestamp = record.timestamp;
 
-            // Add to unique machines
             uniqueMachines.add(machineId);
 
-            // Add to licensed or free machines
-            if (data.isLicensed) {
+            if (record.isLicensed) {
                 licensedMachines.add(machineId);
             } else {
                 freeMachines.add(machineId);
             }
 
-            // Check if used today
             if (timestamp >= todayStart) {
                 todayActiveMachines.add(machineId);
             }
         });
 
-        // Update the display
+        // ✅ 5. UI FRISSÍTÉS
         document.getElementById('totalUniqueUsers').textContent = uniqueMachines.size;
         document.getElementById('licensedUsers').textContent = licensedMachines.size;
         document.getElementById('freeUsers').textContent = freeMachines.size;
         document.getElementById('todayActiveUsers').textContent = todayActiveMachines.size;
+
+        // ✅ 6. CACHE STÁTUSZ LOG
+        if (isFromCache) {
+            console.log(`📦 Usage stats from cache: ${usageData.length} records`);
+        } else {
+            console.log(`🔄 Fresh usage stats loaded: ${usageData.length} records (cached for 30 min)`);
+        }
 
     } catch (error) {
         console.error('Error loading usage stats:', error);
@@ -320,6 +440,8 @@ async function loadUsageStats() {
 
 // Refresh usage statistics
 function refreshUsageStats() {
+    // ✅ Cache törlése a friss adatok betöltéséhez
+    firebaseCache.forceRefresh(firebaseCache.CACHE_KEYS.USAGE_STATS);
     loadUsageStats();
 }
 
@@ -331,15 +453,56 @@ async function loadMachineList() {
     machineListDiv.innerHTML = '<div class="text-center p-3"><div class="spinner-border spinner-border-sm"></div> Betöltés...</div>';
 
     try {
-        // Get all user events to find unique machine IDs
-        const eventsSnapshot = await db.collection('user_events').get();
+        let eventsData = null;
+        let licenseData = null;
+        let isFromCache = false;
+
+        // ✅ 1. CACHE ELLENŐRZÉS - USER EVENTS
+        const cachedEvents = firebaseCache.get(firebaseCache.CACHE_KEYS.USER_EVENTS);
+        const cachedLicenses = firebaseCache.get(firebaseCache.CACHE_KEYS.LICENSES);
+
+        if (cachedEvents && cachedLicenses) {
+            // Van érvényes cache - használjuk azt
+            eventsData = cachedEvents;
+            licenseData = cachedLicenses;
+            isFromCache = true;
+            console.log('📦 Using cached data for machine list');
+        } else {
+            // ✅ 2. FIREBASE LEKÉRÉS - ÖSSZES ADAT (nem limitált!)
+            console.log('🔄 Loading fresh data from Firebase...');
+            
+            // User events betöltése - ÖSSZES adat
+            const eventsSnapshot = await db.collection('user_events')
+                .orderBy('timestamp', 'desc')
+                .get();
+            
+            // Licenses betöltése
+            const licensesSnapshot = await db.collection('licenses').get();
+
+            // Adatok cache-elése
+            eventsData = eventsSnapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data(),
+                timestamp: doc.data().timestamp?.toDate?.() || new Date(doc.data().timestamp)
+            }));
+
+            licenseData = {};
+            licensesSnapshot.forEach(doc => {
+                licenseData[doc.id] = doc.data();
+            });
+
+            // ✅ 3. CACHE MENTÉS
+            firebaseCache.set(firebaseCache.CACHE_KEYS.USER_EVENTS, eventsData);
+            firebaseCache.set(firebaseCache.CACHE_KEYS.LICENSES, licenseData);
+        }
+
+        // ✅ 4. ADATFELDOLGOZÁS (ugyanaz, mint korábban)
         const machineData = {};
 
-        // Collect machine IDs and their latest activity
-        eventsSnapshot.forEach(doc => {
-            const data = doc.data();
+        eventsData.forEach(eventDoc => {
+            const data = eventDoc;
             const machineId = data.machine_id;
-            const timestamp = data.timestamp?.toDate?.() || new Date(data.timestamp);
+            const timestamp = data.timestamp;
 
             if (!machineData[machineId]) {
                 machineData[machineId] = {
@@ -351,45 +514,30 @@ async function loadMachineList() {
                 };
             }
 
-            // Update last activity if this event is newer
             if (timestamp > machineData[machineId].lastActivity) {
                 machineData[machineId].lastActivity = timestamp;
             }
 
-            // Track unique sessions
             if (data.session_id) {
                 machineData[machineId].sessionCount.add(data.session_id);
             }
         });
 
-        // Get license information for name mapping
-        const licensesSnapshot = await db.collection('licenses').get();
-        const licenseMap = {};
-
-        licensesSnapshot.forEach(doc => {
-            const licenseKey = doc.id;
-            const license = doc.data();
-            licenseMap[licenseKey] = {
-                customerName: license.customerName,
-                customerEmail: license.customerEmail,
-                status: license.status
-            };
-        });
-
-        // Convert to array and sort by last activity
+        // License mapping
         const machines = Object.values(machineData).map(machine => {
-            // Find license info for this machine
             let licenseInfo = null;
-            for (const [licenseKey, info] of Object.entries(licenseMap)) {
-                // Check if this machine has used this license key in any event
-                const hasLicense = eventsSnapshot.docs.some(doc => {
-                    const data = doc.data();
-                    return data.machine_id === machine.machineId && 
-                           data.details && 
-                           data.details.license_key === licenseKey;
+            for (const [licenseKey, info] of Object.entries(licenseData)) {
+                const hasLicense = eventsData.some(eventDoc => {
+                    return eventDoc.machine_id === machine.machineId && 
+                           eventDoc.details && 
+                           eventDoc.details.license_key === licenseKey;
                 });
                 if (hasLicense) {
-                    licenseInfo = info;
+                    licenseInfo = {
+                        customerName: info.customerName,
+                        customerEmail: info.customerEmail,
+                        status: info.status
+                    };
                     break;
                 }
             }
@@ -401,13 +549,12 @@ async function loadMachineList() {
             };
         }).sort((a, b) => b.lastActivity - a.lastActivity);
 
-        // Render machine list
+        // ✅ 5. RENDERELÉS
         let html = '';
         machines.forEach(machine => {
             const lastActivityStr = machine.lastActivity.toLocaleDateString('hu-HU') + ' ' + 
                                    machine.lastActivity.toLocaleTimeString('hu-HU');
             
-            // Display name and license info
             const displayName = machine.licenseInfo ? 
                 `${machine.licenseInfo.customerName} (${machine.machineId.substring(0, 8)}...)` : 
                 `${machine.machineId.substring(0, 8)}...`;
@@ -431,12 +578,31 @@ async function loadMachineList() {
             `;
         });
 
-        machineListDiv.innerHTML = html || '<div class="text-muted p-3">Nincs adat</div>';
+        // ✅ 6. STÁTUSZ INFORMÁCIÓ
+        const cacheStatus = isFromCache ? 
+            `<div class="alert alert-success mt-2">
+                <div class="d-flex justify-content-between align-items-center">
+                    <small>📦 Cached data - ${machines.length} machines, ${eventsData.length} events</small>
+                    <button class="btn btn-sm btn-outline-primary" onclick="refreshMachineList()">🔄 Refresh</button>
+                </div>
+            </div>` :
+            `<div class="alert alert-info mt-2">
+                <small>🔄 Fresh data loaded - ${machines.length} machines, ${eventsData.length} events (cached for 30 min)</small>
+            </div>`;
+
+        machineListDiv.innerHTML = (html || '<div class="text-muted p-3">Nincs adat</div>') + cacheStatus;
 
     } catch (error) {
         console.error('Error loading machine list:', error);
         machineListDiv.innerHTML = '<div class="text-danger p-3">Hiba az adatok betöltésekor</div>';
     }
+}
+
+// ✅ Cache frissítés kényszerítése
+function refreshMachineList() {
+    firebaseCache.forceRefresh(firebaseCache.CACHE_KEYS.USER_EVENTS);
+    firebaseCache.forceRefresh(firebaseCache.CACHE_KEYS.LICENSES);
+    loadMachineList();
 }
 
 // Load sessions for a specific machine ID
@@ -445,10 +611,11 @@ async function loadUserSessions(machineId) {
     sessionDetailsDiv.innerHTML = '<div class="text-center p-3"><div class="spinner-border spinner-border-sm"></div> Betöltés...</div>';
 
     try {
-        // Get all events for this machine ID
+        // ✅ OPTIMALIZÁLÁS: Limit az események számára (legfrissebb 1000 esemény)
         const eventsSnapshot = await db.collection('user_events')
             .where('machine_id', '==', machineId)
             .orderBy('timestamp', 'desc')
+            .limit(1000)
             .get();
 
         const sessions = {};
@@ -494,7 +661,13 @@ async function loadUserSessions(machineId) {
 
         // Render sessions
         let html = `<h6>Machine ID: ${machineId}</h6>`;
-        html += `<p class="text-muted">Összes session: ${sessionArray.length}</p>`;
+        
+        // ✅ Információ a limitált adatokról
+        const infoText = eventsSnapshot.size >= 1000 ? 
+            `<p class="text-muted">📊 Showing ${sessionArray.length} sessions from last 1000 events. Some older sessions may not be shown.</p>` :
+            `<p class="text-muted">📊 Showing all ${sessionArray.length} sessions for this machine.</p>`;
+        
+        html += infoText;
 
         sessionArray.forEach((session, index) => {
             const startTimeStr = session.startTime.toLocaleDateString('hu-HU') + ' ' + 
@@ -544,11 +717,12 @@ async function showSessionEvents(sessionId, machineId) {
     modal.show();
 
     try {
-        // Get all events for this session
+        // ✅ OPTIMALIZÁLÁS: Limit a session események számára (legfrissebb 500 esemény)
         const eventsSnapshot = await db.collection('user_events')
             .where('machine_id', '==', machineId)
             .where('session_id', '==', sessionId)
             .orderBy('timestamp', 'asc')
+            .limit(500)
             .get();
 
         const events = [];
@@ -563,6 +737,13 @@ async function showSessionEvents(sessionId, machineId) {
         // Render events timeline
         let html = `<h6>Session: ${sessionId.substring(0, 8)}...</h6>`;
         html += `<p class="text-muted">Machine: ${machineId}</p>`;
+        
+        // ✅ Információ a limitált adatokról
+        const infoText = eventsSnapshot.size >= 500 ? 
+            `<div class="alert alert-warning mb-3"><small>⚠️ Showing first 500 events. Some events may not be displayed.</small></div>` :
+            `<div class="alert alert-info mb-3"><small>📊 Showing all ${events.length} events for this session.</small></div>`;
+        
+        html += infoText;
         html += '<div class="timeline">';
 
         events.forEach((event, index) => {
@@ -618,11 +799,128 @@ function getEventTypeClass(eventType) {
 auth.onAuthStateChanged(user => {
     if (user) {
         showAdminPanel();
+        // ✅ Machine list csak kérésre töltődik be - nem automatikusan
         // Load machine list on admin panel load
-        setTimeout(() => {
-            if (document.getElementById('machineList')) {
-                loadMachineList();
-            }
-        }, 1000);
+        // setTimeout(() => {
+        //     if (document.getElementById('machineList')) {
+        //         loadMachineList();
+        //     }
+        // }, 1000);
     }
 });
+
+// ✅ CACHE KEZELŐ FUNKCIÓK
+function showCacheStatus() {
+    const status = firebaseCache.getStatus();
+    let html = `
+        <div class="modal fade" id="cacheStatusModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">📦 Cache Status & Management</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>Cache Type</th>
+                                        <th>Status</th>
+                                        <th>Age</th>
+                                        <th>Size</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+    `;
+
+    Object.entries(status).forEach(([name, info]) => {
+        const statusBadge = info.valid ? 
+            '<span class="badge bg-success">Valid</span>' : 
+            info.error ? '<span class="badge bg-danger">Error</span>' :
+            '<span class="badge bg-secondary">Not Cached</span>';
+        
+        const sizeText = info.size ? `${(info.size / 1024).toFixed(1)} KB` : '-';
+        const ageText = info.age || '-';
+        
+        html += `
+            <tr>
+                <td>${name.replace('_', ' ')}</td>
+                <td>${statusBadge}</td>
+                <td>${ageText}</td>
+                <td>${sizeText}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-danger" onclick="clearSpecificCache('${firebaseCache.CACHE_KEYS[name]}', '${name}')">
+                        🗑️ Clear
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+
+    html += `
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="d-grid gap-2 mt-3">
+                            <button class="btn btn-warning" onclick="clearAllCache()">
+                                🧹 Clear All Cache
+                            </button>
+                            <button class="btn btn-info" onclick="refreshAllData()">
+                                🔄 Refresh All Data
+                            </button>
+                        </div>
+                        <div class="alert alert-info mt-3">
+                            <small>
+                                <strong>Cache Duration:</strong> 30 minutes<br>
+                                <strong>Benefits:</strong> Faster loading, reduced Firebase reads, offline access to cached data
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Remove existing modal if any
+    document.getElementById('cacheStatusModal')?.remove();
+    
+    // Add modal to DOM
+    document.body.insertAdjacentHTML('beforeend', html);
+    
+    // Show modal
+    new bootstrap.Modal(document.getElementById('cacheStatusModal')).show();
+}
+
+function clearSpecificCache(cacheKey, displayName) {
+    if (confirm(`Are you sure you want to clear ${displayName.replace('_', ' ')} cache?`)) {
+        firebaseCache.forceRefresh(cacheKey);
+        showCacheStatus(); // Refresh the modal
+        console.log(`🗑️ Cleared cache: ${displayName}`);
+    }
+}
+
+function clearAllCache() {
+    if (confirm('Are you sure you want to clear ALL cache? This will force fresh data loading on next access.')) {
+        firebaseCache.cleanup();
+        showCacheStatus(); // Refresh the modal
+        console.log('🧹 All cache cleared');
+    }
+}
+
+function refreshAllData() {
+    if (confirm('This will refresh all cached data from Firebase. Continue?')) {
+        firebaseCache.cleanup();
+        // Close modal
+        bootstrap.Modal.getInstance(document.getElementById('cacheStatusModal')).hide();
+        
+        // Refresh current view
+        if (document.getElementById('machineList').innerHTML.includes('machines')) {
+            loadMachineList();
+        }
+        loadUsageStats();
+        
+        console.log('🔄 All data refreshed from Firebase');
+    }
+}
