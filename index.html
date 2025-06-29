@@ -27,185 +27,43 @@
             
             <!-- Usage Statistics -->
             <div class="card mb-4 p-3">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h3 class="h5 mb-0">📊 Használati Statisztikák</h3>
-                    <div>
-                        <button onclick="refreshUsageStats()" class="btn btn-sm btn-info me-2">🔄 Frissítés</button>
-                        <button onclick="showCacheStatus()" class="btn btn-sm btn-outline-secondary">📦 Cache</button>
+                <h3 class="h5">Használati Statisztikák (Elmúlt 7 nap)</h3>
+                <div class="row">
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h5 class="card-title">Összes Egyedi Felhasználó</h5>
+                                <p class="h2" id="totalUniqueUsers">-</p>
+                            </div>
+                        </div>
                     </div>
-                </div>
-                
-                <!-- All Time Stats -->
-                <div class="mb-4">
-                    <h6 class="text-muted mb-3">🌟 All Time Statisztikák</h6>
-                    <div class="row">
-                        <div class="col-md-2">
-                            <div class="card bg-primary text-white">
-                                <div class="card-body text-center">
-                                    <h6 class="card-title">Összes Felhasználó</h6>
-                                    <p class="h3 mb-0" id="allTimeUniqueUsers">-</p>
-                                </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h5 class="card-title">Licenszelt Felhasználók</h5>
+                                <p class="h2" id="licensedUsers">-</p>
                             </div>
                         </div>
-                        <div class="col-md-2">
-                            <div class="card bg-success text-white">
-                                <div class="card-body text-center">
-                                    <h6 class="card-title">Összes Session</h6>
-                                    <p class="h3 mb-0" id="allTimeSessions">-</p>
-                                </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h5 class="card-title">Ingyenes Felhasználók</h5>
+                                <p class="h2" id="freeUsers">-</p>
                             </div>
                         </div>
-                        <div class="col-md-2">
-                            <div class="card bg-info text-white">
-                                <div class="card-body text-center">
-                                    <h6 class="card-title">Összes Session Idő</h6>
-                                    <p class="h3 mb-0" id="allTimeSessionDuration">-</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="card bg-warning text-white">
-                                <div class="card-body text-center">
-                                    <h6 class="card-title">Átlagos Session</h6>
-                                    <p class="h3 mb-0" id="averageSessionDuration">-</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="card bg-secondary text-white">
-                                <div class="card-body text-center">
-                                    <h6 class="card-title">Licenszelt Ráta</h6>
-                                    <p class="h3 mb-0" id="licensedUserRate">-</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="card bg-dark text-white">
-                                <div class="card-body text-center">
-                                    <h6 class="card-title">Retention Rate</h6>
-                                    <p class="h3 mb-0" id="retentionRate">-</p>
-                                </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h5 class="card-title">Mai Aktív Felhasználók</h5>
+                                <p class="h2" id="todayActiveUsers">-</p>
                             </div>
                         </div>
                     </div>
                 </div>
-
-                <!-- Daily Stats -->
-                <div class="mb-4">
-                    <h6 class="text-muted mb-3">📅 Mai Statisztikák</h6>
-                    <div class="row">
-                        <div class="col-md-3">
-                            <div class="card bg-light">
-                                <div class="card-body text-center">
-                                    <h6 class="card-title">Mai Aktív Felhasználók</h6>
-                                    <p class="h2" id="todayActiveUsers">-</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="card bg-light">
-                                <div class="card-body text-center">
-                                    <h6 class="card-title">Mai Sessions</h6>
-                                    <p class="h2" id="todaySessions">-</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="card bg-light">
-                                <div class="card-body text-center">
-                                    <h6 class="card-title">Mai Session Idő</h6>
-                                    <p class="h2" id="todaySessionDuration">-</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="card bg-light">
-                                <div class="card-body text-center">
-                                    <h6 class="card-title">Mai Átlagos Session</h6>
-                                    <p class="h2" id="todayAverageSession">-</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Platform & Version Stats -->
-                <div class="mb-4">
-                    <h6 class="text-muted mb-3">💻 Platform & Verzió Eloszlás</h6>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="card">
-                                <div class="card-body">
-                                    <h6 class="card-title">Platform Statisztikák</h6>
-                                    <div id="platformStats">
-                                        <div class="text-center text-muted p-3">
-                                            <div class="spinner-border spinner-border-sm"></div>
-                                            Betöltés...
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="card">
-                                <div class="card-body">
-                                    <h6 class="card-title">Verzió Statisztikák</h6>
-                                    <div id="versionStats">
-                                        <div class="text-center text-muted p-3">
-                                            <div class="spinner-border spinner-border-sm"></div>
-                                            Betöltés...
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Activity Trends -->
-                <div class="mb-4">
-                    <h6 class="text-muted mb-3">📈 Aktivitási Trendek (Elmúlt 7 nap)</h6>
-                    <div class="row">
-                        <div class="col-md-4">
-                            <div class="card bg-light">
-                                <div class="card-body text-center">
-                                    <h6 class="card-title">7 Napos Egyedi Felhasználók</h6>
-                                    <p class="h2" id="weeklyUniqueUsers">-</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="card bg-light">
-                                <div class="card-body text-center">
-                                    <h6 class="card-title">7 Napos Sessions</h6>
-                                    <p class="h2" id="weeklySessions">-</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="card bg-light">
-                                <div class="card-body text-center">
-                                    <h6 class="card-title">Visszatérő Felhasználók</h6>
-                                    <p class="h2" id="returningUsers">-</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Top Events -->
-                <div class="mb-4">
-                    <h6 class="text-muted mb-3">🏆 Legnépszerűbb Funkciók</h6>
-                    <div class="card">
-                        <div class="card-body">
-                            <div id="topEventsStats">
-                                <div class="text-center text-muted p-3">
-                                    <div class="spinner-border spinner-border-sm"></div>
-                                    Betöltés...
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                <div class="mt-3">
+                    <button onclick="refreshUsageStats()" class="btn btn-sm btn-info">Frissítés</button>
                 </div>
             </div>
             

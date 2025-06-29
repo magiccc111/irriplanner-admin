@@ -16,9 +16,7 @@ class FirebaseCache {
         this.CACHE_KEYS = {
             USER_EVENTS: 'firebase_cache_user_events',
             USAGE_STATS: 'firebase_cache_usage_stats',
-            LICENSES: 'firebase_cache_licenses',
-            ALL_TIME_STATS: 'firebase_cache_all_time_stats',
-            COMPREHENSIVE_STATS: 'firebase_cache_comprehensive_stats'
+            LICENSES: 'firebase_cache_licenses'
         };
         
         // ✅ Verzió ellenőrzés és hibás cache-ek törlése
@@ -117,301 +115,6 @@ class FirebaseCache {
 
 // Globális cache instance
 const firebaseCache = new FirebaseCache();
-
-// ✅ STATISZTIKA SZÁMÍTÓ RENDSZER
-class StatisticsCalculator {
-    constructor() {
-        this.stats = {
-            allTime: {},
-            today: {},
-            weekly: {},
-            platform: {},
-            version: {},
-            events: {},
-            sessions: {}
-        };
-    }
-
-    // Főfüggvény: Összes statisztika kiszámítása
-    calculateComprehensiveStats(userEvents, usageStats, licenses) {
-        console.log('🧮 Calculating comprehensive statistics...');
-        
-        const now = new Date();
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
-        const weekAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
-
-        // ✅ 1. ALL TIME STATISZTIKÁK
-        this.calculateAllTimeStats(userEvents, usageStats, licenses);
-        
-        // ✅ 2. NAPI STATISZTIKÁK
-        this.calculateDailyStats(userEvents, usageStats, todayStart);
-        
-        // ✅ 3. HETI STATISZTIKÁK
-        this.calculateWeeklyStats(userEvents, usageStats, weekAgo);
-        
-        // ✅ 4. PLATFORM ÉS VERZIÓ STATISZTIKÁK
-        this.calculatePlatformAndVersionStats(userEvents);
-        
-        // ✅ 5. ESEMÉNY STATISZTIKÁK
-        this.calculateEventStats(userEvents);
-        
-        // ✅ 6. SESSION STATISZTIKÁK
-        this.calculateSessionStats(userEvents);
-
-        console.log('📊 Statistics calculation completed');
-        return this.stats;
-    }
-
-    // All time statisztikák
-    calculateAllTimeStats(userEvents, usageStats, licenses) {
-        const allMachines = new Set();
-        const licensedMachines = new Set();
-        const sessionsMap = new Map(); // session_id -> {startTime, endTime, machineId}
-        let totalSessionDuration = 0;
-
-        // UserEvents feldolgozása
-        userEvents.forEach(event => {
-            allMachines.add(event.machine_id);
-            
-            // Licenszelt felhasználók
-            if (event.details && event.details.license_key) {
-                licensedMachines.add(event.machine_id);
-            }
-
-            // Session tracking
-            if (event.session_id) {
-                if (!sessionsMap.has(event.session_id)) {
-                    sessionsMap.set(event.session_id, {
-                        startTime: event.timestamp,
-                        endTime: event.timestamp,
-                        machineId: event.machine_id
-                    });
-                } else {
-                    const session = sessionsMap.get(event.session_id);
-                    if (event.timestamp < session.startTime) session.startTime = event.timestamp;
-                    if (event.timestamp > session.endTime) session.endTime = event.timestamp;
-                }
-            }
-        });
-
-        // Session időtartamok számítása
-        sessionsMap.forEach(session => {
-            const duration = (session.endTime - session.startTime) / 1000 / 60; // perc
-            totalSessionDuration += Math.max(duration, 0.1); // Min 0.1 perc
-        });
-
-        // Retention rate (visszatérő felhasználók)
-        const userSessionCounts = new Map();
-        sessionsMap.forEach(session => {
-            const count = userSessionCounts.get(session.machineId) || 0;
-            userSessionCounts.set(session.machineId, count + 1);
-        });
-        const returningUsers = Array.from(userSessionCounts.values()).filter(count => count > 1).length;
-
-        this.stats.allTime = {
-            uniqueUsers: allMachines.size,
-            licensedUsers: licensedMachines.size,
-            totalSessions: sessionsMap.size,
-            totalSessionDuration: totalSessionDuration,
-            averageSessionDuration: sessionsMap.size > 0 ? totalSessionDuration / sessionsMap.size : 0,
-            licensedRate: allMachines.size > 0 ? (licensedMachines.size / allMachines.size * 100) : 0,
-            retentionRate: allMachines.size > 0 ? (returningUsers / allMachines.size * 100) : 0
-        };
-    }
-
-    // Napi statisztikák
-    calculateDailyStats(userEvents, usageStats, todayStart) {
-        const todayMachines = new Set();
-        const todaySessions = new Set();
-        const todaySessionsMap = new Map();
-        let todaySessionDuration = 0;
-
-        userEvents.forEach(event => {
-            if (event.timestamp >= todayStart) {
-                todayMachines.add(event.machine_id);
-                
-                if (event.session_id) {
-                    todaySessions.add(event.session_id);
-                    
-                    if (!todaySessionsMap.has(event.session_id)) {
-                        todaySessionsMap.set(event.session_id, {
-                            startTime: event.timestamp,
-                            endTime: event.timestamp
-                        });
-                    } else {
-                        const session = todaySessionsMap.get(event.session_id);
-                        if (event.timestamp < session.startTime) session.startTime = event.timestamp;
-                        if (event.timestamp > session.endTime) session.endTime = event.timestamp;
-                    }
-                }
-            }
-        });
-
-        // Mai session időtartamok
-        todaySessionsMap.forEach(session => {
-            const duration = (session.endTime - session.startTime) / 1000 / 60; // perc
-            todaySessionDuration += Math.max(duration, 0.1);
-        });
-
-        this.stats.today = {
-            activeUsers: todayMachines.size,
-            sessions: todaySessions.size,
-            sessionDuration: todaySessionDuration,
-            averageSession: todaySessions.size > 0 ? todaySessionDuration / todaySessions.size : 0
-        };
-    }
-
-    // Heti statisztikák
-    calculateWeeklyStats(userEvents, usageStats, weekAgo) {
-        const weeklyMachines = new Set();
-        const weeklySessions = new Set();
-        const userSessionCounts = new Map();
-
-        userEvents.forEach(event => {
-            if (event.timestamp >= weekAgo) {
-                weeklyMachines.add(event.machine_id);
-                
-                if (event.session_id) {
-                    weeklySessions.add(event.session_id);
-                    
-                    // Felhasználói session számolás
-                    const count = userSessionCounts.get(event.machine_id) || 0;
-                    if (!userSessionCounts.has(event.machine_id)) {
-                        userSessionCounts.set(event.machine_id, 1);
-                    }
-                }
-            }
-        });
-
-        const returningUsers = Array.from(userSessionCounts.values()).filter(count => count > 1).length;
-
-        this.stats.weekly = {
-            uniqueUsers: weeklyMachines.size,
-            sessions: weeklySessions.size,
-            returningUsers: returningUsers
-        };
-    }
-
-    // Platform és verzió statisztikák
-    calculatePlatformAndVersionStats(userEvents) {
-        const platformCounts = new Map();
-        const versionCounts = new Map();
-
-        userEvents.forEach(event => {
-            // Platform statisztikák
-            const os = event.os || 'Unknown';
-            platformCounts.set(os, (platformCounts.get(os) || 0) + 1);
-
-            // Verzió statisztikák
-            const version = event.app_version || 'Unknown';
-            versionCounts.set(version, (versionCounts.get(version) || 0) + 1);
-        });
-
-        this.stats.platform = Object.fromEntries(platformCounts);
-        this.stats.version = Object.fromEntries(versionCounts);
-    }
-
-    // Esemény statisztikák
-    calculateEventStats(userEvents) {
-        const eventCounts = new Map();
-        const eventTypeCounts = new Map();
-
-        userEvents.forEach(event => {
-            // Esemény név statisztikák
-            const eventName = event.event_name || 'Unknown';
-            eventCounts.set(eventName, (eventCounts.get(eventName) || 0) + 1);
-
-            // Esemény típus statisztikák
-            const eventType = event.event_type || 'Unknown';
-            eventTypeCounts.set(eventType, (eventTypeCounts.get(eventType) || 0) + 1);
-        });
-
-        this.stats.events = {
-            eventNames: Object.fromEntries(eventCounts),
-            eventTypes: Object.fromEntries(eventTypeCounts)
-        };
-    }
-
-    // Session statisztikák
-    calculateSessionStats(userEvents) {
-        const sessionsMap = new Map();
-        const sessionDurations = [];
-
-        userEvents.forEach(event => {
-            if (event.session_id) {
-                if (!sessionsMap.has(event.session_id)) {
-                    sessionsMap.set(event.session_id, {
-                        startTime: event.timestamp,
-                        endTime: event.timestamp,
-                        eventCount: 1
-                    });
-                } else {
-                    const session = sessionsMap.get(event.session_id);
-                    if (event.timestamp < session.startTime) session.startTime = event.timestamp;
-                    if (event.timestamp > session.endTime) session.endTime = event.timestamp;
-                    session.eventCount++;
-                }
-            }
-        });
-
-        // Session időtartamok és egyéb metrikák
-        sessionsMap.forEach(session => {
-            const duration = (session.endTime - session.startTime) / 1000 / 60; // perc
-            sessionDurations.push(Math.max(duration, 0.1));
-        });
-
-        sessionDurations.sort((a, b) => a - b);
-        const medianIndex = Math.floor(sessionDurations.length / 2);
-
-        this.stats.sessions = {
-            totalSessions: sessionsMap.size,
-            averageDuration: sessionDurations.length > 0 ? 
-                sessionDurations.reduce((a, b) => a + b, 0) / sessionDurations.length : 0,
-            medianDuration: sessionDurations.length > 0 ? sessionDurations[medianIndex] : 0,
-            shortSessions: sessionDurations.filter(d => d < 1).length, // < 1 perc
-            mediumSessions: sessionDurations.filter(d => d >= 1 && d < 10).length, // 1-10 perc
-            longSessions: sessionDurations.filter(d => d >= 10).length // > 10 perc
-        };
-    }
-
-    // Formázott adatok UI-hoz
-    getFormattedStats() {
-        return {
-            allTime: {
-                uniqueUsers: this.stats.allTime.uniqueUsers?.toLocaleString() || '0',
-                totalSessions: this.stats.allTime.totalSessions?.toLocaleString() || '0',
-                totalSessionDuration: this.formatDuration(this.stats.allTime.totalSessionDuration || 0),
-                averageSessionDuration: this.formatDuration(this.stats.allTime.averageSessionDuration || 0),
-                licensedRate: `${(this.stats.allTime.licensedRate || 0).toFixed(1)}%`,
-                retentionRate: `${(this.stats.allTime.retentionRate || 0).toFixed(1)}%`
-            },
-            today: {
-                activeUsers: this.stats.today.activeUsers?.toLocaleString() || '0',
-                sessions: this.stats.today.sessions?.toLocaleString() || '0',
-                sessionDuration: this.formatDuration(this.stats.today.sessionDuration || 0),
-                averageSession: this.formatDuration(this.stats.today.averageSession || 0)
-            },
-            weekly: {
-                uniqueUsers: this.stats.weekly.uniqueUsers?.toLocaleString() || '0',
-                sessions: this.stats.weekly.sessions?.toLocaleString() || '0',
-                returningUsers: this.stats.weekly.returningUsers?.toLocaleString() || '0'
-            }
-        };
-    }
-
-    // Időtartam formázása
-    formatDuration(minutes) {
-        if (minutes < 1) return `${Math.round(minutes * 60)}s`;
-        if (minutes < 60) return `${Math.round(minutes)}m`;
-        const hours = Math.floor(minutes / 60);
-        const mins = Math.round(minutes % 60);
-        return `${hours}h ${mins}m`;
-    }
-}
-
-// Globális statistics calculator instance
-const statisticsCalculator = new StatisticsCalculator();
 
 // ✅ Helper funkció a biztonságos Date konverzióhoz
 function safeToDate(timestamp) {
@@ -688,271 +391,99 @@ function displayCurrentSavedVersion(version) {
     }
 }
 
-// ✅ KIBŐVÍTETT STATISZTIKA BETÖLTŐ RENDSZER
+// Load usage statistics
 async function loadUsageStats() {
     try {
-        let comprehensiveStats = null;
+        let usageData = null;
         let isFromCache = false;
 
-        // ✅ 1. CACHE ELLENŐRZÉS - COMPREHENSIVE STATS
-        const cachedStats = firebaseCache.get(firebaseCache.CACHE_KEYS.COMPREHENSIVE_STATS);
+        // ✅ 1. CACHE ELLENŐRZÉS - USAGE STATS
+        const cachedUsageStats = firebaseCache.get(firebaseCache.CACHE_KEYS.USAGE_STATS);
 
-        if (cachedStats) {
-            // Van érvényes cache - használjuk azt
-            comprehensiveStats = cachedStats;
+        if (cachedUsageStats) {
+            // Van érvényes cache
+            usageData = cachedUsageStats;
             isFromCache = true;
-            console.log('📦 Using cached comprehensive stats');
-        } else {
-            // ✅ 2. FIREBASE ADATOK BETÖLTÉSE - ALL TIME DATA
-            console.log('🔄 Loading comprehensive stats from Firebase...');
+            console.log('📦 Using cached usage stats');
             
-            // MINDEN adat betöltése - nincs időkorlát az all time statisztikákhoz
-            const [userEventsSnapshot, usageStatsSnapshot, licensesSnapshot] = await Promise.all([
-                db.collection('user_events').orderBy('timestamp', 'desc').get(),
-                db.collection('usage_stats').orderBy('timestamp', 'desc').get(),
-                db.collection('licenses').get()
-            ]);
+            // ✅ FIX: Timestamp string-ek visszaalakítása Date objektumokká
+            usageData = usageData.map(record => ({
+                ...record,
+                timestamp: safeToDate(record.timestamp)
+            }));
+        } else {
+            // ✅ 2. FIREBASE LEKÉRÉS
+            console.log('🔄 Loading fresh usage stats from Firebase...');
+            
+            const now = new Date();
+            const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+            
+            const snapshot = await db.collection('usage_stats')
+                .where('timestamp', '>=', sevenDaysAgo)
+                .orderBy('timestamp', 'desc')
+                .get(); // Eltávolítottuk a limit-et a teljes adat eléréséhez
 
-            // Adatok feldolgozása
-            const userEvents = userEventsSnapshot.docs.map(doc => ({
+            // Adatok átalakítása cache-eléshez
+            usageData = snapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data(),
                 timestamp: safeToDate(doc.data().timestamp)
             }));
 
-            const usageStats = usageStatsSnapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data(),
-                timestamp: safeToDate(doc.data().timestamp)
-            }));
-
-            const licenses = {};
-            licensesSnapshot.forEach(doc => {
-                licenses[doc.id] = doc.data();
-            });
-
-            // ✅ 3. STATISZTIKÁK SZÁMÍTÁSA
-            comprehensiveStats = statisticsCalculator.calculateComprehensiveStats(
-                userEvents, 
-                usageStats, 
-                licenses
-            );
-
-            // ✅ 4. CACHE MENTÉS
-            firebaseCache.set(firebaseCache.CACHE_KEYS.COMPREHENSIVE_STATS, comprehensiveStats);
+            // ✅ 3. CACHE MENTÉS
+            firebaseCache.set(firebaseCache.CACHE_KEYS.USAGE_STATS, usageData);
         }
 
+        // ✅ 4. ADATFELDOLGOZÁS
+        const now = new Date();
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+
+        const uniqueMachines = new Set();
+        const licensedMachines = new Set();
+        const freeMachines = new Set();
+        const todayActiveMachines = new Set();
+
+        usageData.forEach(record => {
+            const machineId = record.machineId;
+            const timestamp = record.timestamp;
+
+            uniqueMachines.add(machineId);
+
+            if (record.isLicensed) {
+                licensedMachines.add(machineId);
+            } else {
+                freeMachines.add(machineId);
+            }
+
+            if (timestamp >= todayStart) {
+                todayActiveMachines.add(machineId);
+            }
+        });
+
         // ✅ 5. UI FRISSÍTÉS
-        updateStatsUI(comprehensiveStats, isFromCache);
+        document.getElementById('totalUniqueUsers').textContent = uniqueMachines.size;
+        document.getElementById('licensedUsers').textContent = licensedMachines.size;
+        document.getElementById('freeUsers').textContent = freeMachines.size;
+        document.getElementById('todayActiveUsers').textContent = todayActiveMachines.size;
+
+        // ✅ 6. CACHE STÁTUSZ LOG
+        if (isFromCache) {
+            console.log(`📦 Usage stats from cache: ${usageData.length} records`);
+        } else {
+            console.log(`🔄 Fresh usage stats loaded: ${usageData.length} records (cached for 30 min)`);
+        }
 
     } catch (error) {
-        console.error('Error loading comprehensive stats:', error);
-        console.warn('Hibakezelt verzió: alapértelmezett értékek beállítása');
-        
-        // ✅ Alapértelmezett értékek beállítása hiba esetén
-        setDefaultStatsValues();
-        
-        // Felhasználó értesítése
-        const errorMessage = 'Hiba a statisztikák betöltésekor. Alapértelmezett értékek megjelenítése.';
-        console.warn(errorMessage);
-        
-        // Nem jelenítünk meg alert-et, csak konzol warning-et
+        console.error('Error loading usage stats:', error);
+        alert('Error loading usage statistics: ' + error.message);
     }
-}
-
-// ✅ UI FRISSÍTŐ FÜGGVÉNY
-function updateStatsUI(stats, isFromCache) {
-    const formatted = statisticsCalculator.getFormattedStats();
-    
-    // All Time Stats
-    document.getElementById('allTimeUniqueUsers').textContent = formatted.allTime.uniqueUsers;
-    document.getElementById('allTimeSessions').textContent = formatted.allTime.totalSessions;
-    document.getElementById('allTimeSessionDuration').textContent = formatted.allTime.totalSessionDuration;
-    document.getElementById('averageSessionDuration').textContent = formatted.allTime.averageSessionDuration;
-    document.getElementById('licensedUserRate').textContent = formatted.allTime.licensedRate;
-    document.getElementById('retentionRate').textContent = formatted.allTime.retentionRate;
-
-    // Daily Stats
-    document.getElementById('todayActiveUsers').textContent = formatted.today.activeUsers;
-    document.getElementById('todaySessions').textContent = formatted.today.sessions;
-    document.getElementById('todaySessionDuration').textContent = formatted.today.sessionDuration;
-    document.getElementById('todayAverageSession').textContent = formatted.today.averageSession;
-
-    // Weekly Stats
-    document.getElementById('weeklyUniqueUsers').textContent = formatted.weekly.uniqueUsers;
-    document.getElementById('weeklySessions').textContent = formatted.weekly.sessions;
-    document.getElementById('returningUsers').textContent = formatted.weekly.returningUsers;
-
-    // Platform & Version Stats
-    updatePlatformStats(stats.platform);
-    updateVersionStats(stats.version);
-    updateTopEventsStats(stats.events);
-
-    // ✅ 6. CACHE STÁTUSZ LOG
-    if (isFromCache) {
-        console.log(`📦 Comprehensive stats from cache`);
-    } else {
-        console.log(`🔄 Fresh comprehensive stats calculated and cached for 30 min`);
-    }
-}
-
-// ✅ Platform statisztikák megjelenítése
-function updatePlatformStats(platformData) {
-    const platformStatsDiv = document.getElementById('platformStats');
-    
-    if (!platformData || Object.keys(platformData).length === 0) {
-        platformStatsDiv.innerHTML = '<p class="text-muted">Nincs adat</p>';
-        return;
-    }
-
-    const sortedPlatforms = Object.entries(platformData)
-        .sort(([,a], [,b]) => b - a)
-        .slice(0, 5); // Top 5 platform
-
-    let html = '';
-    const total = Object.values(platformData).reduce((sum, count) => sum + count, 0);
-
-    sortedPlatforms.forEach(([platform, count]) => {
-        const percentage = ((count / total) * 100).toFixed(1);
-        html += `
-            <div class="d-flex justify-content-between align-items-center mb-2">
-                <span>${platform}</span>
-                <div>
-                    <span class="badge bg-primary">${count.toLocaleString()}</span>
-                    <small class="text-muted ms-1">${percentage}%</small>
-                </div>
-            </div>
-        `;
-    });
-
-    platformStatsDiv.innerHTML = html;
-}
-
-// ✅ Verzió statisztikák megjelenítése
-function updateVersionStats(versionData) {
-    const versionStatsDiv = document.getElementById('versionStats');
-    
-    if (!versionData || Object.keys(versionData).length === 0) {
-        versionStatsDiv.innerHTML = '<p class="text-muted">Nincs adat</p>';
-        return;
-    }
-
-    const sortedVersions = Object.entries(versionData)
-        .sort(([,a], [,b]) => b - a)
-        .slice(0, 5); // Top 5 verzió
-
-    let html = '';
-    const total = Object.values(versionData).reduce((sum, count) => sum + count, 0);
-
-    sortedVersions.forEach(([version, count]) => {
-        const percentage = ((count / total) * 100).toFixed(1);
-        html += `
-            <div class="d-flex justify-content-between align-items-center mb-2">
-                <span>v${version}</span>
-                <div>
-                    <span class="badge bg-success">${count.toLocaleString()}</span>
-                    <small class="text-muted ms-1">${percentage}%</small>
-                </div>
-            </div>
-        `;
-    });
-
-    versionStatsDiv.innerHTML = html;
-}
-
-// ✅ Top események statisztikák megjelenítése
-function updateTopEventsStats(eventsData) {
-    const topEventsStatsDiv = document.getElementById('topEventsStats');
-    
-    if (!eventsData || !eventsData.eventNames || Object.keys(eventsData.eventNames).length === 0) {
-        topEventsStatsDiv.innerHTML = '<p class="text-muted">Nincs adat</p>';
-        return;
-    }
-
-    const sortedEvents = Object.entries(eventsData.eventNames)
-        .sort(([,a], [,b]) => b - a)
-        .slice(0, 10); // Top 10 esemény
-
-    let html = '<div class="row">';
-    const total = Object.values(eventsData.eventNames).reduce((sum, count) => sum + count, 0);
-
-    sortedEvents.forEach(([eventName, count], index) => {
-        const percentage = ((count / total) * 100).toFixed(1);
-        const iconClass = getEventIcon(eventName);
-        
-        html += `
-            <div class="col-md-6 mb-2">
-                <div class="d-flex justify-content-between align-items-center p-2 border rounded">
-                    <div>
-                        <span class="me-2">${iconClass}</span>
-                        <small>${eventName}</small>
-                    </div>
-                    <div>
-                        <span class="badge bg-info">${count.toLocaleString()}</span>
-                        <small class="text-muted ms-1">${percentage}%</small>
-                    </div>
-                </div>
-            </div>
-        `;
-    });
-
-    html += '</div>';
-    topEventsStatsDiv.innerHTML = html;
-}
-
-// ✅ Esemény ikonok
-function getEventIcon(eventName) {
-    const icons = {
-        'session_start': '🚀',
-        'session_end': '🏁',
-        'polygon_created': '📐',
-        'sprinkler_placed': '💧',
-        'button_click': '👆',
-        'menu_opened': '📋',
-        'feature_used': '⚙️',
-        'error_occurred': '❌',
-        'file_saved': '💾',
-        'file_loaded': '📂'
-    };
-    return icons[eventName] || '📊';
-}
-
-// ✅ Alapértelmezett statisztika értékek beállítása hiba esetén
-function setDefaultStatsValues() {
-    // All Time Stats
-    document.getElementById('allTimeUniqueUsers').textContent = '0';
-    document.getElementById('allTimeSessions').textContent = '0';
-    document.getElementById('allTimeSessionDuration').textContent = '0m';
-    document.getElementById('averageSessionDuration').textContent = '0m';
-    document.getElementById('licensedUserRate').textContent = '0%';
-    document.getElementById('retentionRate').textContent = '0%';
-
-    // Daily Stats
-    document.getElementById('todayActiveUsers').textContent = '0';
-    document.getElementById('todaySessions').textContent = '0';
-    document.getElementById('todaySessionDuration').textContent = '0m';
-    document.getElementById('todayAverageSession').textContent = '0m';
-
-    // Weekly Stats
-    document.getElementById('weeklyUniqueUsers').textContent = '0';
-    document.getElementById('weeklySessions').textContent = '0';
-    document.getElementById('returningUsers').textContent = '0';
-
-    // Platform & Version Stats
-    document.getElementById('platformStats').innerHTML = '<p class="text-muted">❌ Nincs elérhető adat</p>';
-    document.getElementById('versionStats').innerHTML = '<p class="text-muted">❌ Nincs elérhető adat</p>';
-    document.getElementById('topEventsStats').innerHTML = '<p class="text-muted">❌ Nincs elérhető adat</p>';
-
-    console.log('✅ Default stats values set due to error');
 }
 
 // Refresh usage statistics
 function refreshUsageStats() {
     // ✅ Cache törlése a friss adatok betöltéséhez
-    firebaseCache.forceRefresh(firebaseCache.CACHE_KEYS.COMPREHENSIVE_STATS);
     firebaseCache.forceRefresh(firebaseCache.CACHE_KEYS.USAGE_STATS);
-    firebaseCache.forceRefresh(firebaseCache.CACHE_KEYS.USER_EVENTS);
-    firebaseCache.forceRefresh(firebaseCache.CACHE_KEYS.LICENSES);
     loadUsageStats();
 }
 
@@ -1316,11 +847,13 @@ function getEventTypeClass(eventType) {
 auth.onAuthStateChanged(user => {
     if (user) {
         showAdminPanel();
-        
-        // ✅ Statisztikák automatikus betöltése
-        setTimeout(() => {
-            loadUsageStats();
-        }, 1000);
+        // ✅ Machine list csak kérésre töltődik be - nem automatikusan
+        // Load machine list on admin panel load
+        // setTimeout(() => {
+        //     if (document.getElementById('machineList')) {
+        //         loadMachineList();
+        //     }
+        // }, 1000);
     }
 });
 
@@ -1425,24 +958,16 @@ function clearAllCache() {
 }
 
 function refreshAllData() {
-    if (confirm('Ez frissíteni fogja az összes cache-elt adatot a Firebase-ből. Folytatja?')) {
+    if (confirm('This will refresh all cached data from Firebase. Continue?')) {
         firebaseCache.cleanup();
+        // Close modal
+        bootstrap.Modal.getInstance(document.getElementById('cacheStatusModal')).hide();
         
-        // Close modal if open
-        const modal = document.getElementById('cacheStatusModal');
-        if (modal) {
-            const modalInstance = bootstrap.Modal.getInstance(modal);
-            if (modalInstance) modalInstance.hide();
-        }
-        
-        // Refresh current views
-        loadUsageStats(); // Ez most már comprehensive statisztikákat tölt be
-        
-        // Ha a machine list be van töltve, azt is frissítjük
-        const machineListDiv = document.getElementById('machineList');
-        if (machineListDiv && machineListDiv.innerHTML.includes('machines')) {
+        // Refresh current view
+        if (document.getElementById('machineList').innerHTML.includes('machines')) {
             loadMachineList();
         }
+        loadUsageStats();
         
         console.log('🔄 All data refreshed from Firebase');
     }
