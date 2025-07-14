@@ -130,3 +130,19 @@ pre {
     padding: 0.25rem 0.5rem;
     font-size: 0.875rem;
 }
+
+/* Admin version display */
+.admin-version {
+    position: relative;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+
+.admin-version small {
+    color: #6c757d !important;
+    font-weight: 500;
+}
+
+.admin-version span {
+    font-weight: 600;
+    color: #495057 !important;
+}
