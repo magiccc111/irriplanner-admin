@@ -844,11 +844,11 @@ async function showSessionEvents(sessionId, machineId) {
     modal.show();
 
     try {
-        // ✅ OPTIMALIZÁLÁS: Limit a session események számára (legfrissebb 100 esemény)
+        // ✅ OPTIMALIZÁLÁS: Limit a session események számára (utolsó 100 esemény)
         const eventsSnapshot = await db.collection('user_events')
             .where('machine_id', '==', machineId)
             .where('session_id', '==', sessionId)
-            .orderBy('timestamp', 'asc')
+            .orderBy('timestamp', 'desc')
             .limit(100)
             .get();
 
@@ -860,6 +860,9 @@ async function showSessionEvents(sessionId, machineId) {
                 timestamp: safeToDate(data.timestamp)
             });
         });
+        
+        // ✅ Események visszarendezése időrend szerint (DESC-ből ASC-be a megjelenítéshez)
+        events.reverse();
 
         // Render events timeline
         let html = `<h6>Session: ${sessionId.substring(0, 8)}...</h6>`;
@@ -867,7 +870,7 @@ async function showSessionEvents(sessionId, machineId) {
         
         // ✅ Információ a limitált adatokról
         const infoText = eventsSnapshot.size >= 100 ? 
-            `<div class="alert alert-warning mb-3"><small>⚠️ Showing first 100 events. Some events may not be displayed.</small></div>` :
+            `<div class="alert alert-warning mb-3"><small>⚠️ Showing last 100 events. Some older events may not be displayed.</small></div>` :
             `<div class="alert alert-info mb-3"><small>📊 Showing all ${events.length} events for this session.</small></div>`;
         
         html += infoText;
