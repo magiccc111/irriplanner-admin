@@ -11,8 +11,8 @@
 // ✅ CACHE KEZELŐ RENDSZER
 class FirebaseCache {
     constructor() {
-        this.CACHE_DURATION = 30 * 60 * 1000; // 30 perc milliszekundumban
-        this.CACHE_VERSION = 'v1.1'; // ✅ Cache verzió a hibás cache-ek törléséhez
+        this.CACHE_DURATION = 60 * 60 * 1000; // 60 perc milliszekundumban (növeltük 30-ról)
+        this.CACHE_VERSION = 'v1.2'; // ✅ Cache verzió frissítve a változás miatt
         this.CACHE_KEYS = {
             USER_EVENTS: 'firebase_cache_user_events',
             USAGE_STATS: 'firebase_cache_usage_stats',
@@ -471,7 +471,7 @@ async function loadUsageStats() {
         if (isFromCache) {
             console.log(`📦 Usage stats from cache: ${usageData.length} records`);
         } else {
-            console.log(`🔄 Fresh usage stats loaded: ${usageData.length} records (cached for 30 min)`);
+            console.log(`🔄 Fresh usage stats loaded: ${usageData.length} records (cached for 60 min)`);
         }
 
     } catch (error) {
@@ -489,10 +489,20 @@ function refreshUsageStats() {
 
 // === ANALYTICS FUNCTIONS ===
 
+// Paginálási változók
+let currentMachineListPage = 0;
+const MACHINES_PER_PAGE = 20;
+let allMachines = [];
+
 // Load machine list with user information
-async function loadMachineList() {
+async function loadMachineList(isLoadMore = false) {
     const machineListDiv = document.getElementById('machineList');
-    machineListDiv.innerHTML = '<div class="text-center p-3"><div class="spinner-border spinner-border-sm"></div> Betöltés...</div>';
+    
+    if (!isLoadMore) {
+        machineListDiv.innerHTML = '<div class="text-center p-3"><div class="spinner-border spinner-border-sm"></div> Betöltés...</div>';
+        currentMachineListPage = 0;
+        allMachines = [];
+    }
 
     try {
         let eventsData = null;
@@ -516,12 +526,18 @@ async function loadMachineList() {
                 timestamp: safeToDate(event.timestamp)
             }));
         } else {
-            // ✅ 2. FIREBASE LEKÉRÉS - ÖSSZES ADAT (nem limitált!)
-            console.log('🔄 Loading fresh data from Firebase...');
+            // ✅ 2. FIREBASE LEKÉRÉS - 48 ÓRÁS IDŐSZŰRŐVEL ÉS LIMITTEL
+            console.log('🔄 Loading fresh data from Firebase (last 48 hours)...');
             
-            // User events betöltése - ÖSSZES adat
+            // 48 órával ezelőtti időpont
+            const now = new Date();
+            const twoDaysAgo = new Date(now.getTime() - (48 * 60 * 60 * 1000));
+            
+            // User events betöltése - csak az elmúlt 48 óra, max 500 esemény
             const eventsSnapshot = await db.collection('user_events')
+                .where('timestamp', '>=', twoDaysAgo)
                 .orderBy('timestamp', 'desc')
+                .limit(500)
                 .get();
             
             // Licenses betöltése
@@ -597,9 +613,19 @@ async function loadMachineList() {
             };
         }).sort((a, b) => b.lastActivity - a.lastActivity);
 
-        // ✅ 5. RENDERELÉS
-        let html = '';
-        machines.forEach(machine => {
+        // Ha új betöltés, tároljuk az összes gépet
+        if (!isLoadMore) {
+            allMachines = machines;
+        }
+
+        // ✅ 5. RENDERELÉS - csak az aktuális oldalnyi adat
+        const startIndex = currentMachineListPage * MACHINES_PER_PAGE;
+        const endIndex = startIndex + MACHINES_PER_PAGE;
+        const pageMachines = allMachines.slice(startIndex, endIndex);
+        
+        let html = isLoadMore ? machineListDiv.innerHTML.replace(/<div class="alert.*?<\/div><\/div>/s, '') : '';
+        
+        pageMachines.forEach(machine => {
             const lastActivityStr = machine.lastActivity.toLocaleDateString('hu-HU') + ' ' + 
                                    machine.lastActivity.toLocaleTimeString('hu-HU');
             
@@ -626,19 +652,28 @@ async function loadMachineList() {
             `;
         });
 
-        // ✅ 6. STÁTUSZ INFORMÁCIÓ
+        // ✅ 6. Load more gomb
+        const hasMore = endIndex < allMachines.length;
+        const loadMoreBtn = hasMore ? 
+            `<div class="text-center mt-3">
+                <button class="btn btn-primary" onclick="loadMoreMachines()">
+                    Több betöltése (${allMachines.length - endIndex} további)
+                </button>
+            </div>` : '';
+
+        // ✅ 7. STÁTUSZ INFORMÁCIÓ
         const cacheStatus = isFromCache ? 
             `<div class="alert alert-success mt-2">
                 <div class="d-flex justify-content-between align-items-center">
-                    <small>📦 Cached data - ${machines.length} machines, ${eventsData.length} events</small>
+                    <small>📦 Cached data (last 48 hours) - Showing ${startIndex + 1}-${Math.min(endIndex, allMachines.length)} of ${allMachines.length} machines</small>
                     <button class="btn btn-sm btn-outline-primary" onclick="refreshMachineList()">🔄 Refresh</button>
                 </div>
             </div>` :
             `<div class="alert alert-info mt-2">
-                <small>🔄 Fresh data loaded - ${machines.length} machines, ${eventsData.length} events (cached for 30 min)</small>
+                <small>🔄 Fresh data loaded (last 48 hours) - Showing ${startIndex + 1}-${Math.min(endIndex, allMachines.length)} of ${allMachines.length} machines (cached for 60 min)</small>
             </div>`;
 
-        machineListDiv.innerHTML = (html || '<div class="text-muted p-3">Nincs adat</div>') + cacheStatus;
+        machineListDiv.innerHTML = (html || '<div class="text-muted p-3">Nincs adat</div>') + loadMoreBtn + cacheStatus;
 
     } catch (error) {
         console.error('Error loading machine list:', error);
@@ -650,7 +685,15 @@ async function loadMachineList() {
 function refreshMachineList() {
     firebaseCache.forceRefresh(firebaseCache.CACHE_KEYS.USER_EVENTS);
     firebaseCache.forceRefresh(firebaseCache.CACHE_KEYS.LICENSES);
+    currentMachineListPage = 0;
+    allMachines = [];
     loadMachineList();
+}
+
+// ✅ Több gép betöltése
+function loadMoreMachines() {
+    currentMachineListPage++;
+    loadMachineList(true);
 }
 
 // Load sessions for a specific machine ID
@@ -659,11 +702,11 @@ async function loadUserSessions(machineId) {
     sessionDetailsDiv.innerHTML = '<div class="text-center p-3"><div class="spinner-border spinner-border-sm"></div> Betöltés...</div>';
 
     try {
-        // ✅ OPTIMALIZÁLÁS: Limit az események számára (legfrissebb 1000 esemény)
+        // ✅ OPTIMALIZÁLÁS: Limit az események számára (legfrissebb 200 esemény)
         const eventsSnapshot = await db.collection('user_events')
             .where('machine_id', '==', machineId)
             .orderBy('timestamp', 'desc')
-            .limit(1000)
+            .limit(200)
             .get();
 
         const sessions = {};
@@ -711,8 +754,8 @@ async function loadUserSessions(machineId) {
         let html = `<h6>Machine ID: ${machineId}</h6>`;
         
         // ✅ Információ a limitált adatokról
-        const infoText = eventsSnapshot.size >= 1000 ? 
-            `<p class="text-muted">📊 Showing ${sessionArray.length} sessions from last 1000 events. Some older sessions may not be shown.</p>` :
+        const infoText = eventsSnapshot.size >= 200 ? 
+            `<p class="text-muted">📊 Showing ${sessionArray.length} sessions from last 200 events. Some older sessions may not be shown.</p>` :
             `<p class="text-muted">📊 Showing all ${sessionArray.length} sessions for this machine.</p>`;
         
         html += infoText;
@@ -765,12 +808,12 @@ async function showSessionEvents(sessionId, machineId) {
     modal.show();
 
     try {
-        // ✅ OPTIMALIZÁLÁS: Limit a session események számára (legfrissebb 500 esemény)
+        // ✅ OPTIMALIZÁLÁS: Limit a session események számára (legfrissebb 100 esemény)
         const eventsSnapshot = await db.collection('user_events')
             .where('machine_id', '==', machineId)
             .where('session_id', '==', sessionId)
             .orderBy('timestamp', 'asc')
-            .limit(500)
+            .limit(100)
             .get();
 
         const events = [];
@@ -787,8 +830,8 @@ async function showSessionEvents(sessionId, machineId) {
         html += `<p class="text-muted">Machine: ${machineId}</p>`;
         
         // ✅ Információ a limitált adatokról
-        const infoText = eventsSnapshot.size >= 500 ? 
-            `<div class="alert alert-warning mb-3"><small>⚠️ Showing first 500 events. Some events may not be displayed.</small></div>` :
+        const infoText = eventsSnapshot.size >= 100 ? 
+            `<div class="alert alert-warning mb-3"><small>⚠️ Showing first 100 events. Some events may not be displayed.</small></div>` :
             `<div class="alert alert-info mb-3"><small>📊 Showing all ${events.length} events for this session.</small></div>`;
         
         html += infoText;
@@ -921,7 +964,7 @@ function showCacheStatus() {
                         </div>
                         <div class="alert alert-info mt-3">
                             <small>
-                                <strong>Cache Duration:</strong> 30 minutes<br>
+                                <strong>Cache Duration:</strong> 60 minutes<br>
                                 <strong>Benefits:</strong> Faster loading, reduced Firebase reads, offline access to cached data
                             </small>
                         </div>
