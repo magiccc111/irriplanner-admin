@@ -8,11 +8,14 @@
     }
 })();
 
+// ✅ ADMIN PANEL VERZIÓ
+const ADMIN_PANEL_VERSION = 'v1.3.0';
+
 // ✅ CACHE KEZELŐ RENDSZER
 class FirebaseCache {
     constructor() {
         this.CACHE_DURATION = 60 * 60 * 1000; // 60 perc milliszekundumban (növeltük 30-ról)
-        this.CACHE_VERSION = 'v1.2'; // ✅ Cache verzió frissítve a változás miatt
+        this.CACHE_VERSION = 'v1.3'; // ✅ Cache verzió frissítve a változás miatt
         this.CACHE_KEYS = {
             USER_EVENTS: 'firebase_cache_user_events',
             USAGE_STATS: 'firebase_cache_usage_stats',
@@ -178,9 +181,21 @@ async function login() {
 function showAdminPanel() {
     document.getElementById('loginForm').classList.add('d-none');
     document.getElementById('adminPanel').classList.remove('d-none');
+    
+    // ✅ Verziószám megjelenítése
+    displayAdminVersion();
+    
     loadLicenses();
     loadAndDisplayCurrentVersion();
     loadUsageStats(); // Load usage statistics
+}
+
+// ✅ Admin panel verziószám megjelenítése
+function displayAdminVersion() {
+    const versionElement = document.getElementById('adminVersion');
+    if (versionElement) {
+        versionElement.textContent = ADMIN_PANEL_VERSION;
+    }
 }
 
 // Generate new license
@@ -623,7 +638,16 @@ async function loadMachineList(isLoadMore = false) {
         const endIndex = startIndex + MACHINES_PER_PAGE;
         const pageMachines = allMachines.slice(startIndex, endIndex);
         
-        let html = isLoadMore ? machineListDiv.innerHTML.replace(/<div class="alert.*?<\/div><\/div>/s, '') : '';
+        // ✅ Teljesítmény optimalizálás - array használata string concat helyett
+        const htmlParts = [];
+        
+        // Ha több betöltés, akkor megtartjuk a meglévő elemeket
+        if (isLoadMore) {
+            const existingItems = machineListDiv.querySelectorAll('.list-group-item');
+            existingItems.forEach(item => {
+                htmlParts.push(item.outerHTML);
+            });
+        }
         
         pageMachines.forEach(machine => {
             const lastActivityStr = machine.lastActivity.toLocaleDateString('hu-HU') + ' ' + 
@@ -637,7 +661,7 @@ async function loadMachineList(isLoadMore = false) {
                 `<span class="badge bg-success">Licensed</span>` : 
                 `<span class="badge bg-secondary">Free User</span>`;
             
-            html += `
+            htmlParts.push(`
                 <div class="list-group-item list-group-item-action" onclick="loadUserSessions('${machine.machineId}')">
                     <div class="d-flex w-100 justify-content-between">
                         <h6 class="mb-1">${displayName}</h6>
@@ -649,7 +673,7 @@ async function loadMachineList(isLoadMore = false) {
                     </div>
                     ${machine.licenseInfo ? `<small class="text-muted">${machine.licenseInfo.customerEmail}</small>` : ''}
                 </div>
-            `;
+            `);
         });
 
         // ✅ 6. Load more gomb
@@ -673,7 +697,19 @@ async function loadMachineList(isLoadMore = false) {
                 <small>🔄 Fresh data loaded (last 48 hours) - Showing ${startIndex + 1}-${Math.min(endIndex, allMachines.length)} of ${allMachines.length} machines (cached for 60 min)</small>
             </div>`;
 
-        machineListDiv.innerHTML = (html || '<div class="text-muted p-3">Nincs adat</div>') + loadMoreBtn + cacheStatus;
+        // ✅ HTML összeállítás és DOM frissítés
+        const machineListHTML = htmlParts.length > 0 ? htmlParts.join('') : '<div class="text-muted p-3">Nincs adat</div>';
+        
+        // ✅ Külön divek a jobb teljesítményért
+        const machineListContainer = `
+            <div class="machine-list-items">
+                ${machineListHTML}
+            </div>
+            ${loadMoreBtn}
+            ${cacheStatus}
+        `;
+        
+        machineListDiv.innerHTML = machineListContainer;
 
     } catch (error) {
         console.error('Error loading machine list:', error);
