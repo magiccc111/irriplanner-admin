@@ -582,6 +582,12 @@ async function loadMachineList(isLoadMore = false) {
             const data = eventDoc;
             const machineId = data.machine_id;
             const timestamp = data.timestamp;
+            
+            // Skip events with null or undefined machine_id
+            if (!machineId) {
+                console.warn('Skipping event with null/undefined machine_id:', data);
+                return;
+            }
 
             if (!machineData[machineId]) {
                 machineData[machineId] = {
@@ -653,16 +659,24 @@ async function loadMachineList(isLoadMore = false) {
             const lastActivityStr = machine.lastActivity.toLocaleDateString('hu-HU') + ' ' + 
                                    machine.lastActivity.toLocaleTimeString('hu-HU');
             
+            const machineIdDisplay = machine.machineId ? 
+                machine.machineId.substring(0, 8) + '...' : 
+                'Unknown Machine';
+            
             const displayName = machine.licenseInfo ? 
-                `${machine.licenseInfo.customerName} (${machine.machineId.substring(0, 8)}...)` : 
-                `${machine.machineId.substring(0, 8)}...`;
+                `${machine.licenseInfo.customerName} (${machineIdDisplay})` : 
+                machineIdDisplay;
             
             const licenseStatus = machine.licenseInfo ? 
                 `<span class="badge bg-success">Licensed</span>` : 
                 `<span class="badge bg-secondary">Free User</span>`;
             
+            const onclickAttr = machine.machineId ? 
+                `onclick="loadUserSessions('${machine.machineId}')"` : 
+                'onclick="alert(\'Cannot load sessions: Machine ID is missing\')"';
+            
             htmlParts.push(`
-                <div class="list-group-item list-group-item-action" onclick="loadUserSessions('${machine.machineId}')">
+                <div class="list-group-item list-group-item-action" ${onclickAttr}>
                     <div class="d-flex w-100 justify-content-between">
                         <h6 class="mb-1">${displayName}</h6>
                         <small>${lastActivityStr}</small>
@@ -738,94 +752,153 @@ async function loadUserSessions(machineId) {
     sessionDetailsDiv.innerHTML = '<div class="text-center p-3"><div class="spinner-border spinner-border-sm"></div> Betöltés...</div>';
 
     try {
-        // ✅ OPTIMALIZÁLÁS: Limit az események számára (legfrissebb 200 esemény)
-        const eventsSnapshot = await db.collection('user_events')
+        const twoDaysAgo = new Date();
+        twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+
+        // Query 1: Get ALL session_start events (minimal data)
+        const sessionStartsSnapshot = await db.collection('user_events')
             .where('machine_id', '==', machineId)
+            .where('event_name', '==', 'session_start')
             .orderBy('timestamp', 'desc')
-            .limit(200)
             .get();
 
-        const sessions = {};
+        // Query 2: Get detailed events for last 2 days
+        const recentEventsSnapshot = await db.collection('user_events')
+            .where('machine_id', '==', machineId)
+            .where('timestamp', '>=', twoDaysAgo)
+            .orderBy('timestamp', 'desc')
+            .get();
 
-        // Group events by session ID
-        eventsSnapshot.forEach(doc => {
+        // Process all sessions from session_start events
+        const allSessions = {};
+        sessionStartsSnapshot.forEach(doc => {
+            const data = doc.data();
+            const sessionId = data.session_id;
+            const timestamp = safeToDate(data.timestamp);
+            
+            allSessions[sessionId] = {
+                sessionId,
+                startTime: timestamp,
+                hasDetailedData: false,
+                events: [],
+                duration: 0
+            };
+        });
+
+        // Process detailed events for recent sessions
+        const recentSessions = {};
+        recentEventsSnapshot.forEach(doc => {
             const data = doc.data();
             const sessionId = data.session_id;
             const timestamp = safeToDate(data.timestamp);
 
-            if (!sessions[sessionId]) {
-                sessions[sessionId] = {
+            if (!recentSessions[sessionId]) {
+                recentSessions[sessionId] = {
                     sessionId,
                     events: [],
                     startTime: timestamp,
                     endTime: timestamp,
-                    duration: 0
+                    duration: 0,
+                    hasDetailedData: true
                 };
             }
 
-            sessions[sessionId].events.push({
+            recentSessions[sessionId].events.push({
                 ...data,
                 timestamp
             });
 
             // Update session time bounds
-            if (timestamp < sessions[sessionId].startTime) {
-                sessions[sessionId].startTime = timestamp;
+            if (timestamp < recentSessions[sessionId].startTime) {
+                recentSessions[sessionId].startTime = timestamp;
             }
-            if (timestamp > sessions[sessionId].endTime) {
-                sessions[sessionId].endTime = timestamp;
+            if (timestamp > recentSessions[sessionId].endTime) {
+                recentSessions[sessionId].endTime = timestamp;
             }
         });
 
-        // Calculate durations and sort events within sessions
-        Object.values(sessions).forEach(session => {
+        // Calculate durations for recent sessions
+        Object.values(recentSessions).forEach(session => {
             session.duration = Math.round((session.endTime - session.startTime) / 1000); // seconds
             session.events.sort((a, b) => a.timestamp - b.timestamp);
         });
 
+        // Merge data: update allSessions with detailed data where available
+        Object.keys(recentSessions).forEach(sessionId => {
+            if (allSessions[sessionId]) {
+                allSessions[sessionId] = recentSessions[sessionId];
+            } else {
+                // Recent session that didn't have a session_start event
+                allSessions[sessionId] = recentSessions[sessionId];
+            }
+        });
+
         // Convert to array and sort by start time
-        const sessionArray = Object.values(sessions).sort((a, b) => b.startTime - a.startTime);
+        const sessionArray = Object.values(allSessions).sort((a, b) => b.startTime - a.startTime);
 
         // Render sessions
         let html = `<h6>Machine ID: ${machineId}</h6>`;
         
-        // ✅ Információ a limitált adatokról
-        const infoText = eventsSnapshot.size >= 200 ? 
-            `<p class="text-muted">📊 Showing ${sessionArray.length} sessions from last 200 events. Some older sessions may not be shown.</p>` :
-            `<p class="text-muted">📊 Showing all ${sessionArray.length} sessions for this machine.</p>`;
+        // Count sessions by type
+        const recentSessionCount = sessionArray.filter(s => s.hasDetailedData).length;
+        const olderSessionCount = sessionArray.filter(s => !s.hasDetailedData).length;
+        
+        const infoText = `<p class="text-muted">📊 Összesen ${sessionArray.length} session 
+            (${recentSessionCount} részletes az elmúlt 2 napból, ${olderSessionCount} régebbi)</p>`;
         
         html += infoText;
 
+        // Separate recent and older sessions
+        let recentSessionsHtml = '';
+        let olderSessionsHtml = '<div class="mt-3"><h6 class="text-muted">Régebbi sessionok (csak alapinfó):</h6><div class="list-group list-group-flush">';
+        
         sessionArray.forEach((session, index) => {
             const startTimeStr = session.startTime.toLocaleDateString('hu-HU') + ' ' + 
                                  session.startTime.toLocaleTimeString('hu-HU');
-            const durationStr = formatDuration(session.duration);
             
-            // Get key events summary
-            const keyEvents = session.events.filter(e => 
-                ['session_start', 'session_end', 'polygon_created', 'sprinkler_type_selected', 'button_click'].includes(e.event_name)
-            );
-
-            html += `
-                <div class="card mb-2">
-                    <div class="card-body p-2">
-                        <div class="d-flex justify-content-between">
-                            <small><strong>Session ${index + 1}</strong></small>
-                            <small>${startTimeStr}</small>
-                        </div>
-                        <div class="d-flex justify-content-between">
-                            <small>Időtartam: ${durationStr}</small>
-                            <small>Események: ${session.events.length}</small>
-                        </div>
-                        <div class="mt-1">
-                            <button class="btn btn-sm btn-outline-primary" onclick="showSessionEvents('${session.sessionId}', '${machineId}')">
-                                Részletek
-                            </button>
+            if (session.hasDetailedData) {
+                // Recent session with full details
+                const durationStr = formatDuration(session.duration);
+                
+                recentSessionsHtml += `
+                    <div class="card mb-2">
+                        <div class="card-body p-2">
+                            <div class="d-flex justify-content-between">
+                                <small><strong>Session ${index + 1}</strong></small>
+                                <small>${startTimeStr}</small>
+                            </div>
+                            <div class="d-flex justify-content-between">
+                                <small>Időtartam: ${durationStr}</small>
+                                <small>Események: ${session.events.length}</small>
+                            </div>
+                            <div class="mt-1">
+                                <button class="btn btn-sm btn-outline-primary" onclick="showSessionEvents('${session.sessionId}', '${machineId}')">
+                                    Részletek
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            `;
+                `;
+            } else {
+                // Older session with basic info only
+                olderSessionsHtml += `
+                    <div class="list-group-item py-1">
+                        <small class="d-flex justify-content-between">
+                            <span>Session ${index + 1}</span>
+                            <span class="text-muted">${startTimeStr}</span>
+                        </small>
+                    </div>
+                `;
+            }
         });
+        
+        olderSessionsHtml += '</div></div>';
+        
+        // Combine HTML
+        html += recentSessionsHtml;
+        if (olderSessionCount > 0) {
+            html += olderSessionsHtml;
+        }
 
         sessionDetailsDiv.innerHTML = html;
 
