@@ -205,6 +205,51 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Event Export for Analysis -->
+            <div class="card p-3 mt-4">
+                <h3 class="h5 mb-3">Esemény Export Viselkedés Elemzéshez</h3>
+                
+                <div class="row">
+                    <div class="col-md-4">
+                        <label for="exportStartDate" class="form-label">Kezdő dátum:</label>
+                        <input type="date" id="exportStartDate" class="form-control mb-2">
+                    </div>
+                    <div class="col-md-4">
+                        <label for="exportEndDate" class="form-label">Befejező dátum:</label>
+                        <input type="date" id="exportEndDate" class="form-control mb-2">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">&nbsp;</label>
+                        <button onclick="exportEventsByDateRange()" class="btn btn-primary w-100">
+                            <span id="exportButtonText">Export CSV</span>
+                            <span id="exportSpinner" class="spinner-border spinner-border-sm ms-2 d-none"></span>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="row mt-3">
+                    <div class="col-md-12">
+                        <div id="exportProgress" class="alert alert-info d-none">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span id="exportProgressText">Események betöltése...</span>
+                                <span id="exportProgressCount" class="badge bg-primary">0</span>
+                            </div>
+                        </div>
+                        <div id="exportStatus" class="alert d-none"></div>
+                    </div>
+                </div>
+                
+                <div class="row mt-2">
+                    <div class="col-md-12">
+                        <small class="text-muted">
+                            Az export tartalmazza az összes felhasználó összes eseményét a megadott időszakból. 
+                            A CSV fájl tartalmazza: timestamp, machine_id, session_id, event_name, event_type, 
+                            app_version, os, licensz információk és részletek.
+                        </small>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 

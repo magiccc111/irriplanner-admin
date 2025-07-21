@@ -1127,3 +1127,276 @@ function refreshAllData() {
         console.log('🔄 All data refreshed from Firebase');
     }
 }
+
+// === EVENT EXPORT FUNCTIONS ===
+
+// Fetch all events by date range with pagination
+async function fetchAllEventsByDateRange(startDate, endDate) {
+    const allEvents = [];
+    let lastDoc = null;
+    let hasMore = true;
+    const batchSize = 500;
+    
+    // Convert dates to Firebase timestamps
+    const startTimestamp = new Date(startDate);
+    startTimestamp.setHours(0, 0, 0, 0);
+    const endTimestamp = new Date(endDate);
+    endTimestamp.setHours(23, 59, 59, 999);
+    
+    console.log(`📅 Fetching events from ${startTimestamp.toLocaleDateString()} to ${endTimestamp.toLocaleDateString()}`);
+    
+    while (hasMore) {
+        try {
+            let query = db.collection('user_events')
+                .where('timestamp', '>=', startTimestamp)
+                .where('timestamp', '<=', endTimestamp)
+                .orderBy('timestamp', 'desc')
+                .limit(batchSize);
+            
+            if (lastDoc) {
+                query = query.startAfter(lastDoc);
+            }
+            
+            const snapshot = await query.get();
+            
+            if (snapshot.empty) {
+                hasMore = false;
+                break;
+            }
+            
+            snapshot.docs.forEach(doc => {
+                const data = doc.data();
+                allEvents.push({
+                    id: doc.id,
+                    ...data,
+                    timestamp: safeToDate(data.timestamp)
+                });
+            });
+            
+            // Update progress
+            updateExportProgress(allEvents.length);
+            
+            // Get last document for pagination
+            lastDoc = snapshot.docs[snapshot.docs.length - 1];
+            hasMore = snapshot.docs.length === batchSize;
+            
+            console.log(`📊 Fetched batch: ${snapshot.docs.length} events (Total: ${allEvents.length})`);
+            
+        } catch (error) {
+            console.error('Error fetching events batch:', error);
+            throw error;
+        }
+    }
+    
+    return allEvents;
+}
+
+// Update export progress UI
+function updateExportProgress(count) {
+    const progressCount = document.getElementById('exportProgressCount');
+    if (progressCount) {
+        progressCount.textContent = count;
+    }
+}
+
+// Convert events to CSV format
+async function convertEventsToCSV(events) {
+    // First, we need to get license information for all machines
+    const machineToLicense = await getMachineLicenseMapping(events);
+    
+    // CSV headers
+    const headers = [
+        'timestamp',
+        'machine_id',
+        'session_id',
+        'event_name',
+        'event_type',
+        'app_version',
+        'os',
+        'is_licensed',
+        'customer_name',
+        'customer_email',
+        'license_key',
+        'event_details'
+    ];
+    
+    // Build CSV rows
+    const rows = [headers.join(',')];
+    
+    events.forEach(event => {
+        const licenseInfo = machineToLicense[event.machine_id] || {};
+        
+        const row = [
+            event.timestamp.toISOString(),
+            event.machine_id || '',
+            event.session_id || '',
+            event.event_name || '',
+            event.event_type || '',
+            event.app_version || '',
+            event.os || '',
+            licenseInfo.isLicensed ? 'YES' : 'NO',
+            licenseInfo.customerName || '',
+            licenseInfo.customerEmail || '',
+            licenseInfo.licenseKey || '',
+            event.details ? JSON.stringify(event.details).replace(/"/g, '""') : ''
+        ];
+        
+        // Escape values and wrap in quotes if they contain commas or quotes
+        const escapedRow = row.map(value => {
+            const strValue = String(value);
+            if (strValue.includes(',') || strValue.includes('"') || strValue.includes('\n')) {
+                return `"${strValue.replace(/"/g, '""')}"`;
+            }
+            return strValue;
+        });
+        
+        rows.push(escapedRow.join(','));
+    });
+    
+    return rows.join('\n');
+}
+
+// Get machine to license mapping
+async function getMachineLicenseMapping(events) {
+    const mapping = {};
+    
+    try {
+        // Get all licenses
+        const licensesSnapshot = await db.collection('licenses').get();
+        const licenses = {};
+        licensesSnapshot.forEach(doc => {
+            licenses[doc.id] = doc.data();
+        });
+        
+        // Find which machines have licenses based on events
+        events.forEach(event => {
+            if (!mapping[event.machine_id] && event.details && event.details.license_key) {
+                const licenseKey = event.details.license_key;
+                if (licenses[licenseKey]) {
+                    mapping[event.machine_id] = {
+                        isLicensed: true,
+                        licenseKey: licenseKey,
+                        customerName: licenses[licenseKey].customerName,
+                        customerEmail: licenses[licenseKey].customerEmail
+                    };
+                }
+            }
+        });
+        
+        // Mark all other machines as unlicensed
+        events.forEach(event => {
+            if (!mapping[event.machine_id]) {
+                mapping[event.machine_id] = {
+                    isLicensed: false
+                };
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error getting license mapping:', error);
+    }
+    
+    return mapping;
+}
+
+// Download CSV file
+function downloadCSV(csvContent, filename) {
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    
+    if (navigator.msSaveBlob) {
+        // IE 10+
+        navigator.msSaveBlob(blob, filename);
+    } else {
+        // Other browsers
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+}
+
+// Main export function
+async function exportEventsByDateRange() {
+    const startDateInput = document.getElementById('exportStartDate');
+    const endDateInput = document.getElementById('exportEndDate');
+    const exportButton = document.querySelector('[onclick="exportEventsByDateRange()"]');
+    const exportButtonText = document.getElementById('exportButtonText');
+    const exportSpinner = document.getElementById('exportSpinner');
+    const exportProgress = document.getElementById('exportProgress');
+    const exportStatus = document.getElementById('exportStatus');
+    
+    // Validate inputs
+    if (!startDateInput.value || !endDateInput.value) {
+        showExportStatus('Kérjük, válassza ki a kezdő és befejező dátumot!', 'danger');
+        return;
+    }
+    
+    const startDate = new Date(startDateInput.value);
+    const endDate = new Date(endDateInput.value);
+    
+    if (startDate > endDate) {
+        showExportStatus('A kezdő dátum nem lehet későbbi, mint a befejező dátum!', 'danger');
+        return;
+    }
+    
+    // Disable button and show spinner
+    exportButton.disabled = true;
+    exportButtonText.textContent = 'Exportálás...';
+    exportSpinner.classList.remove('d-none');
+    exportProgress.classList.remove('d-none');
+    exportStatus.classList.add('d-none');
+    
+    try {
+        // Fetch all events
+        const events = await fetchAllEventsByDateRange(startDateInput.value, endDateInput.value);
+        
+        if (events.length === 0) {
+            showExportStatus('Nincs esemény a megadott időszakban.', 'warning');
+            return;
+        }
+        
+        // Update progress text
+        document.getElementById('exportProgressText').textContent = 'CSV generálása...';
+        
+        // Convert to CSV
+        const csvContent = await convertEventsToCSV(events);
+        
+        // Generate filename
+        const startStr = startDate.toISOString().split('T')[0];
+        const endStr = endDate.toISOString().split('T')[0];
+        const filename = `irriplanner_events_${startStr}_to_${endStr}.csv`;
+        
+        // Download file
+        downloadCSV(csvContent, filename);
+        
+        showExportStatus(`Sikeres export! ${events.length} esemény exportálva.`, 'success');
+        
+    } catch (error) {
+        console.error('Export error:', error);
+        showExportStatus(`Hiba történt az exportálás során: ${error.message}`, 'danger');
+    } finally {
+        // Reset button state
+        exportButton.disabled = false;
+        exportButtonText.textContent = 'Export CSV';
+        exportSpinner.classList.add('d-none');
+        exportProgress.classList.add('d-none');
+    }
+}
+
+// Show export status message
+function showExportStatus(message, type) {
+    const exportStatus = document.getElementById('exportStatus');
+    exportStatus.textContent = message;
+    exportStatus.className = `alert alert-${type}`;
+    exportStatus.classList.remove('d-none');
+    
+    // Auto-hide after 5 seconds for success messages
+    if (type === 'success') {
+        setTimeout(() => {
+            exportStatus.classList.add('d-none');
+        }, 5000);
+    }
+}
