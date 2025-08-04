@@ -8,11 +8,14 @@
     }
 })();
 
+// ✅ ADMIN PANEL VERZIÓ
+const ADMIN_PANEL_VERSION = 'v1.3.0';
+
 // ✅ CACHE KEZELŐ RENDSZER
 class FirebaseCache {
     constructor() {
-        this.CACHE_DURATION = 30 * 60 * 1000; // 30 perc milliszekundumban
-        this.CACHE_VERSION = 'v1.1'; // ✅ Cache verzió a hibás cache-ek törléséhez
+        this.CACHE_DURATION = 60 * 60 * 1000; // 60 perc milliszekundumban (növeltük 30-ról)
+        this.CACHE_VERSION = 'v1.3'; // ✅ Cache verzió frissítve a változás miatt
         this.CACHE_KEYS = {
             USER_EVENTS: 'firebase_cache_user_events',
             USAGE_STATS: 'firebase_cache_usage_stats',
@@ -65,12 +68,64 @@ class FirebaseCache {
                 timestamp: new Date().getTime(),
                 value: value
             };
-            localStorage.setItem(key, JSON.stringify(data));
+            const dataString = JSON.stringify(data);
+            
+            // Ellenőrizzük a storage méretet
+            if (!this.checkStorageQuota(dataString)) {
+                console.warn('Storage quota would be exceeded, cleaning up...');
+                this.cleanup();
+                
+                // Próbáljuk újra kisebb adattal
+                if (!this.checkStorageQuota(dataString)) {
+                    console.warn('Even after cleanup, data too large. Skipping cache.');
+                    return;
+                }
+            }
+            
+            localStorage.setItem(key, dataString);
             console.log(`💾 Cache SAVED: ${key} (${value.length || Object.keys(value).length} items)`);
         } catch (error) {
             console.error('Cache write error:', error);
             // Ha nincs hely, töröljük a legrégebbi cache-eket
             this.cleanup();
+            
+            // Próbáljuk még egyszer
+            try {
+                const data = {
+                    timestamp: new Date().getTime(),
+                    value: value
+                };
+                localStorage.setItem(key, JSON.stringify(data));
+                console.log(`💾 Cache SAVED after cleanup: ${key}`);
+            } catch (retryError) {
+                console.error('Cache write failed even after cleanup:', retryError);
+            }
+        }
+    }
+
+    // Storage kvóta ellenőrzése
+    checkStorageQuota(newDataString) {
+        try {
+            // Jelenlegi storage méret kiszámítása
+            let currentSize = 0;
+            for (let key in localStorage) {
+                if (localStorage.hasOwnProperty(key)) {
+                    currentSize += localStorage[key].length;
+                }
+            }
+            
+            const newDataSize = newDataString.length;
+            const totalSize = currentSize + newDataSize;
+            
+            // 5MB limit (5 * 1024 * 1024 bytes)
+            const QUOTA_LIMIT = 5 * 1024 * 1024;
+            
+            console.log(`📊 Storage check: Current ${(currentSize/1024/1024).toFixed(2)}MB + New ${(newDataSize/1024/1024).toFixed(2)}MB = ${(totalSize/1024/1024).toFixed(2)}MB (Limit: ${(QUOTA_LIMIT/1024/1024).toFixed(2)}MB)`);
+            
+            return totalSize < QUOTA_LIMIT;
+        } catch (error) {
+            console.error('Storage quota check failed:', error);
+            return false;
         }
     }
 
@@ -178,9 +233,23 @@ async function login() {
 function showAdminPanel() {
     document.getElementById('loginForm').classList.add('d-none');
     document.getElementById('adminPanel').classList.remove('d-none');
+    
+    // ✅ Verziószám megjelenítése
+    displayAdminVersion();
+    
     loadLicenses();
     loadAndDisplayCurrentVersion();
     loadUsageStats(); // Load usage statistics
+    loadActivePromotion(); // Load active promotion status
+    loadPromotionHistory(); // Load promotion history
+}
+
+// ✅ Admin panel verziószám megjelenítése
+function displayAdminVersion() {
+    const versionElement = document.getElementById('adminVersion');
+    if (versionElement) {
+        versionElement.textContent = ADMIN_PANEL_VERSION;
+    }
 }
 
 // Generate new license
@@ -471,7 +540,7 @@ async function loadUsageStats() {
         if (isFromCache) {
             console.log(`📦 Usage stats from cache: ${usageData.length} records`);
         } else {
-            console.log(`🔄 Fresh usage stats loaded: ${usageData.length} records (cached for 30 min)`);
+            console.log(`🔄 Fresh usage stats loaded: ${usageData.length} records (cached for 60 min)`);
         }
 
     } catch (error) {
@@ -489,10 +558,20 @@ function refreshUsageStats() {
 
 // === ANALYTICS FUNCTIONS ===
 
+// Paginálási változók
+let currentMachineListPage = 0;
+const MACHINES_PER_PAGE = 20;
+let allMachines = [];
+
 // Load machine list with user information
-async function loadMachineList() {
+async function loadMachineList(isLoadMore = false) {
     const machineListDiv = document.getElementById('machineList');
-    machineListDiv.innerHTML = '<div class="text-center p-3"><div class="spinner-border spinner-border-sm"></div> Betöltés...</div>';
+    
+    if (!isLoadMore) {
+        machineListDiv.innerHTML = '<div class="text-center p-3"><div class="spinner-border spinner-border-sm"></div> Betöltés...</div>';
+        currentMachineListPage = 0;
+        allMachines = [];
+    }
 
     try {
         let eventsData = null;
@@ -516,12 +595,18 @@ async function loadMachineList() {
                 timestamp: safeToDate(event.timestamp)
             }));
         } else {
-            // ✅ 2. FIREBASE LEKÉRÉS - ÖSSZES ADAT (nem limitált!)
-            console.log('🔄 Loading fresh data from Firebase...');
+            // ✅ 2. FIREBASE LEKÉRÉS - 48 ÓRÁS IDŐSZŰRŐVEL ÉS LIMITTEL
+            console.log('🔄 Loading fresh data from Firebase (last 48 hours)...');
             
-            // User events betöltése - ÖSSZES adat
+            // 48 órával ezelőtti időpont
+            const now = new Date();
+            const twoDaysAgo = new Date(now.getTime() - (48 * 60 * 60 * 1000));
+            
+            // User events betöltése - csak az elmúlt 48 óra, max 200 esemény
             const eventsSnapshot = await db.collection('user_events')
+                .where('timestamp', '>=', twoDaysAgo)
                 .orderBy('timestamp', 'desc')
+                .limit(200)
                 .get();
             
             // Licenses betöltése
@@ -551,6 +636,12 @@ async function loadMachineList() {
             const data = eventDoc;
             const machineId = data.machine_id;
             const timestamp = data.timestamp;
+            
+            // Skip events with null or undefined machine_id
+            if (!machineId) {
+                console.warn('Skipping event with null/undefined machine_id:', data);
+                return;
+            }
 
             if (!machineData[machineId]) {
                 machineData[machineId] = {
@@ -597,22 +688,49 @@ async function loadMachineList() {
             };
         }).sort((a, b) => b.lastActivity - a.lastActivity);
 
-        // ✅ 5. RENDERELÉS
-        let html = '';
-        machines.forEach(machine => {
+        // Ha új betöltés, tároljuk az összes gépet
+        if (!isLoadMore) {
+            allMachines = machines;
+        }
+
+        // ✅ 5. RENDERELÉS - csak az aktuális oldalnyi adat
+        const startIndex = currentMachineListPage * MACHINES_PER_PAGE;
+        const endIndex = startIndex + MACHINES_PER_PAGE;
+        const pageMachines = allMachines.slice(startIndex, endIndex);
+        
+        // ✅ Teljesítmény optimalizálás - array használata string concat helyett
+        const htmlParts = [];
+        
+        // Ha több betöltés, akkor megtartjuk a meglévő elemeket
+        if (isLoadMore) {
+            const existingItems = machineListDiv.querySelectorAll('.list-group-item');
+            existingItems.forEach(item => {
+                htmlParts.push(item.outerHTML);
+            });
+        }
+        
+        pageMachines.forEach(machine => {
             const lastActivityStr = machine.lastActivity.toLocaleDateString('hu-HU') + ' ' + 
                                    machine.lastActivity.toLocaleTimeString('hu-HU');
             
+            const machineIdDisplay = machine.machineId ? 
+                machine.machineId.substring(0, 8) + '...' : 
+                'Unknown Machine';
+            
             const displayName = machine.licenseInfo ? 
-                `${machine.licenseInfo.customerName} (${machine.machineId.substring(0, 8)}...)` : 
-                `${machine.machineId.substring(0, 8)}...`;
+                `${machine.licenseInfo.customerName} (${machineIdDisplay})` : 
+                machineIdDisplay;
             
             const licenseStatus = machine.licenseInfo ? 
                 `<span class="badge bg-success">Licensed</span>` : 
                 `<span class="badge bg-secondary">Free User</span>`;
             
-            html += `
-                <div class="list-group-item list-group-item-action" onclick="loadUserSessions('${machine.machineId}')">
+            const onclickAttr = machine.machineId ? 
+                `onclick="loadUserSessions('${machine.machineId}')"` : 
+                'onclick="alert(\'Cannot load sessions: Machine ID is missing\')"';
+            
+            htmlParts.push(`
+                <div class="list-group-item list-group-item-action" ${onclickAttr}>
                     <div class="d-flex w-100 justify-content-between">
                         <h6 class="mb-1">${displayName}</h6>
                         <small>${lastActivityStr}</small>
@@ -623,22 +741,43 @@ async function loadMachineList() {
                     </div>
                     ${machine.licenseInfo ? `<small class="text-muted">${machine.licenseInfo.customerEmail}</small>` : ''}
                 </div>
-            `;
+            `);
         });
 
-        // ✅ 6. STÁTUSZ INFORMÁCIÓ
+        // ✅ 6. Load more gomb
+        const hasMore = endIndex < allMachines.length;
+        const loadMoreBtn = hasMore ? 
+            `<div class="text-center mt-3">
+                <button class="btn btn-primary" onclick="loadMoreMachines()">
+                    Több betöltése (${allMachines.length - endIndex} további)
+                </button>
+            </div>` : '';
+
+        // ✅ 7. STÁTUSZ INFORMÁCIÓ
         const cacheStatus = isFromCache ? 
             `<div class="alert alert-success mt-2">
                 <div class="d-flex justify-content-between align-items-center">
-                    <small>📦 Cached data - ${machines.length} machines, ${eventsData.length} events</small>
+                    <small>📦 Cached data (last 48 hours) - Showing ${startIndex + 1}-${Math.min(endIndex, allMachines.length)} of ${allMachines.length} machines</small>
                     <button class="btn btn-sm btn-outline-primary" onclick="refreshMachineList()">🔄 Refresh</button>
                 </div>
             </div>` :
             `<div class="alert alert-info mt-2">
-                <small>🔄 Fresh data loaded - ${machines.length} machines, ${eventsData.length} events (cached for 30 min)</small>
+                <small>🔄 Fresh data loaded (last 48 hours) - Showing ${startIndex + 1}-${Math.min(endIndex, allMachines.length)} of ${allMachines.length} machines (cached for 60 min)</small>
             </div>`;
 
-        machineListDiv.innerHTML = (html || '<div class="text-muted p-3">Nincs adat</div>') + cacheStatus;
+        // ✅ HTML összeállítás és DOM frissítés
+        const machineListHTML = htmlParts.length > 0 ? htmlParts.join('') : '<div class="text-muted p-3">Nincs adat</div>';
+        
+        // ✅ Külön divek a jobb teljesítményért
+        const machineListContainer = `
+            <div class="machine-list-items">
+                ${machineListHTML}
+            </div>
+            ${loadMoreBtn}
+            ${cacheStatus}
+        `;
+        
+        machineListDiv.innerHTML = machineListContainer;
 
     } catch (error) {
         console.error('Error loading machine list:', error);
@@ -650,7 +789,15 @@ async function loadMachineList() {
 function refreshMachineList() {
     firebaseCache.forceRefresh(firebaseCache.CACHE_KEYS.USER_EVENTS);
     firebaseCache.forceRefresh(firebaseCache.CACHE_KEYS.LICENSES);
+    currentMachineListPage = 0;
+    allMachines = [];
     loadMachineList();
+}
+
+// ✅ Több gép betöltése
+function loadMoreMachines() {
+    currentMachineListPage++;
+    loadMachineList(true);
 }
 
 // Load sessions for a specific machine ID
@@ -659,94 +806,153 @@ async function loadUserSessions(machineId) {
     sessionDetailsDiv.innerHTML = '<div class="text-center p-3"><div class="spinner-border spinner-border-sm"></div> Betöltés...</div>';
 
     try {
-        // ✅ OPTIMALIZÁLÁS: Limit az események számára (legfrissebb 1000 esemény)
-        const eventsSnapshot = await db.collection('user_events')
+        const twoDaysAgo = new Date();
+        twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+
+        // Query 1: Get ALL session_start events (minimal data)
+        const sessionStartsSnapshot = await db.collection('user_events')
             .where('machine_id', '==', machineId)
+            .where('event_name', '==', 'session_start')
             .orderBy('timestamp', 'desc')
-            .limit(1000)
             .get();
 
-        const sessions = {};
+        // Query 2: Get detailed events for last 2 days
+        const recentEventsSnapshot = await db.collection('user_events')
+            .where('machine_id', '==', machineId)
+            .where('timestamp', '>=', twoDaysAgo)
+            .orderBy('timestamp', 'desc')
+            .get();
 
-        // Group events by session ID
-        eventsSnapshot.forEach(doc => {
+        // Process all sessions from session_start events
+        const allSessions = {};
+        sessionStartsSnapshot.forEach(doc => {
+            const data = doc.data();
+            const sessionId = data.session_id;
+            const timestamp = safeToDate(data.timestamp);
+            
+            allSessions[sessionId] = {
+                sessionId,
+                startTime: timestamp,
+                hasDetailedData: false,
+                events: [],
+                duration: 0
+            };
+        });
+
+        // Process detailed events for recent sessions
+        const recentSessions = {};
+        recentEventsSnapshot.forEach(doc => {
             const data = doc.data();
             const sessionId = data.session_id;
             const timestamp = safeToDate(data.timestamp);
 
-            if (!sessions[sessionId]) {
-                sessions[sessionId] = {
+            if (!recentSessions[sessionId]) {
+                recentSessions[sessionId] = {
                     sessionId,
                     events: [],
                     startTime: timestamp,
                     endTime: timestamp,
-                    duration: 0
+                    duration: 0,
+                    hasDetailedData: true
                 };
             }
 
-            sessions[sessionId].events.push({
+            recentSessions[sessionId].events.push({
                 ...data,
                 timestamp
             });
 
             // Update session time bounds
-            if (timestamp < sessions[sessionId].startTime) {
-                sessions[sessionId].startTime = timestamp;
+            if (timestamp < recentSessions[sessionId].startTime) {
+                recentSessions[sessionId].startTime = timestamp;
             }
-            if (timestamp > sessions[sessionId].endTime) {
-                sessions[sessionId].endTime = timestamp;
+            if (timestamp > recentSessions[sessionId].endTime) {
+                recentSessions[sessionId].endTime = timestamp;
             }
         });
 
-        // Calculate durations and sort events within sessions
-        Object.values(sessions).forEach(session => {
+        // Calculate durations for recent sessions
+        Object.values(recentSessions).forEach(session => {
             session.duration = Math.round((session.endTime - session.startTime) / 1000); // seconds
             session.events.sort((a, b) => a.timestamp - b.timestamp);
         });
 
+        // Merge data: update allSessions with detailed data where available
+        Object.keys(recentSessions).forEach(sessionId => {
+            if (allSessions[sessionId]) {
+                allSessions[sessionId] = recentSessions[sessionId];
+            } else {
+                // Recent session that didn't have a session_start event
+                allSessions[sessionId] = recentSessions[sessionId];
+            }
+        });
+
         // Convert to array and sort by start time
-        const sessionArray = Object.values(sessions).sort((a, b) => b.startTime - a.startTime);
+        const sessionArray = Object.values(allSessions).sort((a, b) => b.startTime - a.startTime);
 
         // Render sessions
         let html = `<h6>Machine ID: ${machineId}</h6>`;
         
-        // ✅ Információ a limitált adatokról
-        const infoText = eventsSnapshot.size >= 1000 ? 
-            `<p class="text-muted">📊 Showing ${sessionArray.length} sessions from last 1000 events. Some older sessions may not be shown.</p>` :
-            `<p class="text-muted">📊 Showing all ${sessionArray.length} sessions for this machine.</p>`;
+        // Count sessions by type
+        const recentSessionCount = sessionArray.filter(s => s.hasDetailedData).length;
+        const olderSessionCount = sessionArray.filter(s => !s.hasDetailedData).length;
+        
+        const infoText = `<p class="text-muted">📊 Összesen ${sessionArray.length} session 
+            (${recentSessionCount} részletes az elmúlt 2 napból, ${olderSessionCount} régebbi)</p>`;
         
         html += infoText;
 
+        // Separate recent and older sessions
+        let recentSessionsHtml = '';
+        let olderSessionsHtml = '<div class="mt-3"><h6 class="text-muted">Régebbi sessionok (csak alapinfó):</h6><div class="list-group list-group-flush">';
+        
         sessionArray.forEach((session, index) => {
             const startTimeStr = session.startTime.toLocaleDateString('hu-HU') + ' ' + 
                                  session.startTime.toLocaleTimeString('hu-HU');
-            const durationStr = formatDuration(session.duration);
             
-            // Get key events summary
-            const keyEvents = session.events.filter(e => 
-                ['session_start', 'session_end', 'polygon_created', 'sprinkler_type_selected', 'button_click'].includes(e.event_name)
-            );
-
-            html += `
-                <div class="card mb-2">
-                    <div class="card-body p-2">
-                        <div class="d-flex justify-content-between">
-                            <small><strong>Session ${index + 1}</strong></small>
-                            <small>${startTimeStr}</small>
-                        </div>
-                        <div class="d-flex justify-content-between">
-                            <small>Időtartam: ${durationStr}</small>
-                            <small>Események: ${session.events.length}</small>
-                        </div>
-                        <div class="mt-1">
-                            <button class="btn btn-sm btn-outline-primary" onclick="showSessionEvents('${session.sessionId}', '${machineId}')">
-                                Részletek
-                            </button>
+            if (session.hasDetailedData) {
+                // Recent session with full details
+                const durationStr = formatDuration(session.duration);
+                
+                recentSessionsHtml += `
+                    <div class="card mb-2">
+                        <div class="card-body p-2">
+                            <div class="d-flex justify-content-between">
+                                <small><strong>Session ${index + 1}</strong></small>
+                                <small>${startTimeStr}</small>
+                            </div>
+                            <div class="d-flex justify-content-between">
+                                <small>Időtartam: ${durationStr}</small>
+                                <small>Események: ${session.events.length}</small>
+                            </div>
+                            <div class="mt-1">
+                                <button class="btn btn-sm btn-outline-primary" onclick="showSessionEvents('${session.sessionId}', '${machineId}')">
+                                    Részletek
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            `;
+                `;
+            } else {
+                // Older session with basic info only
+                olderSessionsHtml += `
+                    <div class="list-group-item py-1">
+                        <small class="d-flex justify-content-between">
+                            <span>Session ${index + 1}</span>
+                            <span class="text-muted">${startTimeStr}</span>
+                        </small>
+                    </div>
+                `;
+            }
         });
+        
+        olderSessionsHtml += '</div></div>';
+        
+        // Combine HTML
+        html += recentSessionsHtml;
+        if (olderSessionCount > 0) {
+            html += olderSessionsHtml;
+        }
 
         sessionDetailsDiv.innerHTML = html;
 
@@ -765,12 +971,12 @@ async function showSessionEvents(sessionId, machineId) {
     modal.show();
 
     try {
-        // ✅ OPTIMALIZÁLÁS: Limit a session események számára (legfrissebb 500 esemény)
+        // ✅ OPTIMALIZÁLÁS: Limit a session események számára (utolsó 100 esemény)
         const eventsSnapshot = await db.collection('user_events')
             .where('machine_id', '==', machineId)
             .where('session_id', '==', sessionId)
-            .orderBy('timestamp', 'asc')
-            .limit(500)
+            .orderBy('timestamp', 'desc')
+            .limit(100)
             .get();
 
         const events = [];
@@ -781,14 +987,17 @@ async function showSessionEvents(sessionId, machineId) {
                 timestamp: safeToDate(data.timestamp)
             });
         });
+        
+        // ✅ Események visszarendezése időrend szerint (DESC-ből ASC-be a megjelenítéshez)
+        events.reverse();
 
         // Render events timeline
         let html = `<h6>Session: ${sessionId.substring(0, 8)}...</h6>`;
         html += `<p class="text-muted">Machine: ${machineId}</p>`;
         
         // ✅ Információ a limitált adatokról
-        const infoText = eventsSnapshot.size >= 500 ? 
-            `<div class="alert alert-warning mb-3"><small>⚠️ Showing first 500 events. Some events may not be displayed.</small></div>` :
+        const infoText = eventsSnapshot.size >= 100 ? 
+            `<div class="alert alert-warning mb-3"><small>⚠️ Showing last 100 events. Some older events may not be displayed.</small></div>` :
             `<div class="alert alert-info mb-3"><small>📊 Showing all ${events.length} events for this session.</small></div>`;
         
         html += infoText;
@@ -921,7 +1130,7 @@ function showCacheStatus() {
                         </div>
                         <div class="alert alert-info mt-3">
                             <small>
-                                <strong>Cache Duration:</strong> 30 minutes<br>
+                                <strong>Cache Duration:</strong> 60 minutes<br>
                                 <strong>Benefits:</strong> Faster loading, reduced Firebase reads, offline access to cached data
                             </small>
                         </div>
@@ -972,3 +1181,632 @@ function refreshAllData() {
         console.log('🔄 All data refreshed from Firebase');
     }
 }
+
+// === EVENT EXPORT FUNCTIONS ===
+
+// Fetch all events by date range with pagination
+async function fetchAllEventsByDateRange(startDate, endDate) {
+    const allEvents = [];
+    let lastDoc = null;
+    let hasMore = true;
+    const batchSize = 500;
+    
+    // Convert dates to Firebase timestamps
+    const startTimestamp = new Date(startDate);
+    startTimestamp.setHours(0, 0, 0, 0);
+    const endTimestamp = new Date(endDate);
+    endTimestamp.setHours(23, 59, 59, 999);
+    
+    console.log(`📅 Fetching events from ${startTimestamp.toLocaleDateString()} to ${endTimestamp.toLocaleDateString()}`);
+    
+    while (hasMore) {
+        try {
+            let query = db.collection('user_events')
+                .where('timestamp', '>=', startTimestamp)
+                .where('timestamp', '<=', endTimestamp)
+                .orderBy('timestamp', 'desc')
+                .limit(batchSize);
+            
+            if (lastDoc) {
+                query = query.startAfter(lastDoc);
+            }
+            
+            const snapshot = await query.get();
+            
+            if (snapshot.empty) {
+                hasMore = false;
+                break;
+            }
+            
+            snapshot.docs.forEach(doc => {
+                const data = doc.data();
+                allEvents.push({
+                    id: doc.id,
+                    ...data,
+                    timestamp: safeToDate(data.timestamp)
+                });
+            });
+            
+            // Update progress
+            updateExportProgress(allEvents.length);
+            
+            // Get last document for pagination
+            lastDoc = snapshot.docs[snapshot.docs.length - 1];
+            hasMore = snapshot.docs.length === batchSize;
+            
+            console.log(`📊 Fetched batch: ${snapshot.docs.length} events (Total: ${allEvents.length})`);
+            
+        } catch (error) {
+            console.error('Error fetching events batch:', error);
+            throw error;
+        }
+    }
+    
+    return allEvents;
+}
+
+// Update export progress UI
+function updateExportProgress(count) {
+    const progressCount = document.getElementById('exportProgressCount');
+    if (progressCount) {
+        progressCount.textContent = count;
+    }
+}
+
+// Convert events to CSV format
+async function convertEventsToCSV(events) {
+    // First, we need to get license information for all machines
+    const machineToLicense = await getMachineLicenseMapping(events);
+    
+    // CSV headers
+    const headers = [
+        'timestamp',
+        'machine_id',
+        'session_id',
+        'event_name',
+        'event_type',
+        'app_version',
+        'os',
+        'is_licensed',
+        'customer_name',
+        'customer_email',
+        'license_key',
+        'event_details'
+    ];
+    
+    // Build CSV rows
+    const rows = [headers.join(',')];
+    
+    events.forEach(event => {
+        const licenseInfo = machineToLicense[event.machine_id] || {};
+        
+        const row = [
+            event.timestamp.toISOString(),
+            event.machine_id || '',
+            event.session_id || '',
+            event.event_name || '',
+            event.event_type || '',
+            event.app_version || '',
+            event.os || '',
+            licenseInfo.isLicensed ? 'YES' : 'NO',
+            licenseInfo.customerName || '',
+            licenseInfo.customerEmail || '',
+            licenseInfo.licenseKey || '',
+            event.details ? JSON.stringify(event.details).replace(/"/g, '""') : ''
+        ];
+        
+        // Escape values and wrap in quotes if they contain commas or quotes
+        const escapedRow = row.map(value => {
+            const strValue = String(value);
+            if (strValue.includes(',') || strValue.includes('"') || strValue.includes('\n')) {
+                return `"${strValue.replace(/"/g, '""')}"`;
+            }
+            return strValue;
+        });
+        
+        rows.push(escapedRow.join(','));
+    });
+    
+    return rows.join('\n');
+}
+
+// Get machine to license mapping
+async function getMachineLicenseMapping(events) {
+    const mapping = {};
+    
+    try {
+        // Get all licenses
+        const licensesSnapshot = await db.collection('licenses').get();
+        const licenses = {};
+        licensesSnapshot.forEach(doc => {
+            licenses[doc.id] = doc.data();
+        });
+        
+        // Find which machines have licenses based on events
+        events.forEach(event => {
+            if (!mapping[event.machine_id] && event.details && event.details.license_key) {
+                const licenseKey = event.details.license_key;
+                if (licenses[licenseKey]) {
+                    mapping[event.machine_id] = {
+                        isLicensed: true,
+                        licenseKey: licenseKey,
+                        customerName: licenses[licenseKey].customerName,
+                        customerEmail: licenses[licenseKey].customerEmail
+                    };
+                }
+            }
+        });
+        
+        // Mark all other machines as unlicensed
+        events.forEach(event => {
+            if (!mapping[event.machine_id]) {
+                mapping[event.machine_id] = {
+                    isLicensed: false
+                };
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error getting license mapping:', error);
+    }
+    
+    return mapping;
+}
+
+// Download CSV file
+function downloadCSV(csvContent, filename) {
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    
+    if (navigator.msSaveBlob) {
+        // IE 10+
+        navigator.msSaveBlob(blob, filename);
+    } else {
+        // Other browsers
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+}
+
+// Main export function
+async function exportEventsByDateRange() {
+    const startDateInput = document.getElementById('exportStartDate');
+    const endDateInput = document.getElementById('exportEndDate');
+    const exportButton = document.querySelector('[onclick="exportEventsByDateRange()"]');
+    const exportButtonText = document.getElementById('exportButtonText');
+    const exportSpinner = document.getElementById('exportSpinner');
+    const exportProgress = document.getElementById('exportProgress');
+    const exportStatus = document.getElementById('exportStatus');
+    
+    // Validate inputs
+    if (!startDateInput.value || !endDateInput.value) {
+        showExportStatus('Kérjük, válassza ki a kezdő és befejező dátumot!', 'danger');
+        return;
+    }
+    
+    const startDate = new Date(startDateInput.value);
+    const endDate = new Date(endDateInput.value);
+    
+    if (startDate > endDate) {
+        showExportStatus('A kezdő dátum nem lehet későbbi, mint a befejező dátum!', 'danger');
+        return;
+    }
+    
+    // Disable button and show spinner
+    exportButton.disabled = true;
+    exportButtonText.textContent = 'Exportálás...';
+    exportSpinner.classList.remove('d-none');
+    exportProgress.classList.remove('d-none');
+    exportStatus.classList.add('d-none');
+    
+    try {
+        // Fetch all events
+        const events = await fetchAllEventsByDateRange(startDateInput.value, endDateInput.value);
+        
+        if (events.length === 0) {
+            showExportStatus('Nincs esemény a megadott időszakban.', 'warning');
+            return;
+        }
+        
+        // Update progress text
+        document.getElementById('exportProgressText').textContent = 'CSV generálása...';
+        
+        // Convert to CSV
+        const csvContent = await convertEventsToCSV(events);
+        
+        // Generate filename
+        const startStr = startDate.toISOString().split('T')[0];
+        const endStr = endDate.toISOString().split('T')[0];
+        const filename = `irriplanner_events_${startStr}_to_${endStr}.csv`;
+        
+        // Download file
+        downloadCSV(csvContent, filename);
+        
+        showExportStatus(`Sikeres export! ${events.length} esemény exportálva.`, 'success');
+        
+    } catch (error) {
+        console.error('Export error:', error);
+        showExportStatus(`Hiba történt az exportálás során: ${error.message}`, 'danger');
+    } finally {
+        // Reset button state
+        exportButton.disabled = false;
+        exportButtonText.textContent = 'Export CSV';
+        exportSpinner.classList.add('d-none');
+        exportProgress.classList.add('d-none');
+    }
+}
+
+// Show export status message
+function showExportStatus(message, type) {
+    const exportStatus = document.getElementById('exportStatus');
+    exportStatus.textContent = message;
+    exportStatus.className = `alert alert-${type}`;
+    exportStatus.classList.remove('d-none');
+    
+    // Auto-hide after 5 seconds for success messages
+    if (type === 'success') {
+        setTimeout(() => {
+            exportStatus.classList.add('d-none');
+        }, 5000);
+    }
+}
+
+// ===== PROMOTION MANAGEMENT FUNCTIONS =====
+
+// Initialize promotion start date to current time
+document.addEventListener('DOMContentLoaded', function() {
+    // Set default start date to current time
+    const now = new Date();
+    const localISOTime = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    const startDateInput = document.getElementById('promotionStartDate');
+    if (startDateInput) {
+        startDateInput.value = localISOTime;
+    }
+});
+
+// Load active promotion status
+async function loadActivePromotion() {
+    try {
+        const promoDoc = await db.collection('promotions').doc('active_promotion').get();
+        
+        if (promoDoc.exists) {
+            const promoData = promoDoc.data();
+            
+            // Check if promotion is still active
+            const now = new Date();
+            const endDate = promoData.endDate.toDate();
+            
+            if (promoData.isActive && endDate > now) {
+                // Show active promotion status
+                displayActivePromotion(promoData);
+            } else if (promoData.isActive && endDate <= now) {
+                // Promotion expired, deactivate it
+                await deactivateExpiredPromotion();
+            }
+        }
+    } catch (error) {
+        console.error('Error loading active promotion:', error);
+    }
+}
+
+// Display active promotion
+function displayActivePromotion(promoData) {
+    const statusDiv = document.getElementById('activePromotionStatus');
+    const formDiv = document.getElementById('createPromotionForm');
+    
+    // Show status, hide form
+    statusDiv.classList.remove('d-none');
+    formDiv.classList.add('d-none');
+    
+    // Fill in promotion details
+    const startDate = promoData.startDate.toDate();
+    const endDate = promoData.endDate.toDate();
+    
+    document.getElementById('promoStartDate').textContent = startDate.toLocaleDateString('hu-HU') + ' ' + startDate.toLocaleTimeString('hu-HU');
+    document.getElementById('promoEndDate').textContent = endDate.toLocaleDateString('hu-HU') + ' ' + endDate.toLocaleTimeString('hu-HU');
+    
+    // Calculate time left
+    updateTimeLeft(endDate);
+    
+    // Update time left every minute
+    setInterval(() => updateTimeLeft(endDate), 60000);
+}
+
+// Update time left display
+function updateTimeLeft(endDate) {
+    const now = new Date();
+    const timeLeft = endDate - now;
+    
+    if (timeLeft <= 0) {
+        document.getElementById('promoTimeLeft').textContent = 'Lejárt';
+        // Refresh the page to update status
+        setTimeout(() => window.location.reload(), 2000);
+        return;
+    }
+    
+    const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+    
+    let timeLeftText = '';
+    if (days > 0) timeLeftText += `${days} nap `;
+    if (hours > 0) timeLeftText += `${hours} óra `;
+    if (minutes > 0) timeLeftText += `${minutes} perc`;
+    
+    document.getElementById('promoTimeLeft').textContent = timeLeftText || 'Kevesebb mint 1 perc';
+}
+
+// Create and activate promotion
+async function createPromotion() {
+    const daysInput = document.getElementById('promotionDays');
+    const startDateInput = document.getElementById('promotionStartDate');
+    
+    const days = parseInt(daysInput.value);
+    const startDateStr = startDateInput.value;
+    
+    if (!days || days < 1 || days > 365) {
+        alert('Kérjük, adjon meg egy érvényes időtartamot (1-365 nap)!');
+        return;
+    }
+    
+    if (!startDateStr) {
+        alert('Kérjük, válasszon kezdési dátumot!');
+        return;
+    }
+    
+    const startDate = new Date(startDateStr);
+    const endDate = new Date(startDate.getTime() + (days * 24 * 60 * 60 * 1000));
+    const now = new Date();
+    
+    if (startDate < now) {
+        if (!confirm('A kezdési dátum a múltban van. Szeretné most azonnal elindítani a promóciót?')) {
+            return;
+        }
+        // Set start date to now if user confirms
+        startDate.setTime(now.getTime());
+        endDate.setTime(now.getTime() + (days * 24 * 60 * 60 * 1000));
+    }
+    
+    try {
+        // Check if there's already an active promotion
+        const existingPromo = await db.collection('promotions').doc('active_promotion').get();
+        if (existingPromo.exists && existingPromo.data().isActive) {
+            if (!confirm('Már van aktív promóció! Biztosan lecseréli az újra?')) {
+                return;
+            }
+        }
+        
+        // Get current user
+        const user = auth.currentUser;
+        if (!user) {
+            alert('Nincs bejelentkezve!');
+            return;
+        }
+        
+        // Create promotion document
+        const promotionData = {
+            startDate: startDate,
+            endDate: endDate,
+            durationDays: days,
+            isActive: true,
+            createdBy: user.email,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        
+        // Save active promotion
+        await db.collection('promotions').doc('active_promotion').set(promotionData);
+        
+        // Save to history
+        const historyId = `promo_${Date.now()}`;
+        await db.collection('promotions').doc(historyId).set({
+            ...promotionData,
+            historyId: historyId
+        });
+        
+        // Extend existing licenses
+        await extendExistingLicenses(days);
+        
+        alert(`Promóció sikeresen aktiválva! Időtartam: ${days} nap`);
+        
+        // Clear form
+        daysInput.value = '';
+        
+        // Refresh displays
+        loadActivePromotion();
+        loadPromotionHistory();
+        
+    } catch (error) {
+        console.error('Error creating promotion:', error);
+        alert('Hiba történt a promóció létrehozásakor: ' + error.message);
+    }
+}
+
+// Extend existing licenses
+async function extendExistingLicenses(days) {
+    try {
+        console.log(`Extending all active licenses by ${days} days...`);
+        
+        const licensesSnapshot = await db.collection('licenses')
+            .where('status', '==', 'active')
+            .get();
+        
+        const batch = db.batch();
+        let extendedCount = 0;
+        
+        licensesSnapshot.forEach(doc => {
+            const licenseData = doc.data();
+            const currentExpiry = licenseData.expiresAt.toDate();
+            const newExpiry = new Date(currentExpiry.getTime() + (days * 24 * 60 * 60 * 1000));
+            
+            batch.update(doc.ref, {
+                expiresAt: newExpiry,
+                extendedByPromotion: true,
+                promotionExtensionDays: (licenseData.promotionExtensionDays || 0) + days,
+                lastPromotionExtension: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            extendedCount++;
+        });
+        
+        if (extendedCount > 0) {
+            await batch.commit();
+            console.log(`Successfully extended ${extendedCount} licenses by ${days} days`);
+        } else {
+            console.log('No active licenses found to extend');
+        }
+        
+    } catch (error) {
+        console.error('Error extending licenses:', error);
+        throw error;
+    }
+}
+
+// Deactivate promotion
+async function deactivatePromotion() {
+    if (!confirm('Biztosan le szeretné állítani a promóciót? Ez nem fogja visszaállítani a meghosszabbított licenszeket.')) {
+        return;
+    }
+    
+    try {
+        await db.collection('promotions').doc('active_promotion').update({
+            isActive: false,
+            deactivatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            deactivatedBy: auth.currentUser?.email || 'unknown'
+        });
+        
+        alert('Promóció sikeresen leállítva!');
+        
+        // Refresh displays
+        hideActivePromotion();
+        loadPromotionHistory();
+        
+    } catch (error) {
+        console.error('Error deactivating promotion:', error);
+        alert('Hiba történt a promóció leállításakor: ' + error.message);
+    }
+}
+
+// Deactivate expired promotion automatically
+async function deactivateExpiredPromotion() {
+    try {
+        await db.collection('promotions').doc('active_promotion').update({
+            isActive: false,
+            expiredAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        console.log('Expired promotion automatically deactivated');
+        
+    } catch (error) {
+        console.error('Error deactivating expired promotion:', error);
+    }
+}
+
+// Hide active promotion display
+function hideActivePromotion() {
+    const statusDiv = document.getElementById('activePromotionStatus');
+    const formDiv = document.getElementById('createPromotionForm');
+    
+    // Hide status, show form
+    statusDiv.classList.add('d-none');
+    formDiv.classList.remove('d-none');
+}
+
+// Load promotion history
+async function loadPromotionHistory() {
+    try {
+        const historyList = document.getElementById('promotionHistoryList');
+        historyList.innerHTML = '<tr><td colspan="5" class="text-center">Betöltés...</td></tr>';
+        
+        // JAVÍTOTT LEKÉRDEZÉS - nincs != operátor
+        const historySnapshot = await db.collection('promotions')
+            .orderBy('createdAt', 'desc')
+            .limit(15)
+            .get();
+        
+        // Kiszűrjük JavaScript-ben az active_promotion-t
+        const historyDocs = [];
+        historySnapshot.forEach(doc => {
+            // Csak azokat tartjuk meg, amik NEM active_promotion és van historyId
+            if (doc.id !== 'active_promotion' && doc.data().historyId) {
+                historyDocs.push(doc);
+            }
+        });
+        
+        if (historyDocs.length === 0) {
+            historyList.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Nincs korábbi promóció</td></tr>';
+            return;
+        }
+        
+        // Maximum 10 elemet jelenítünk meg
+        const displayDocs = historyDocs.slice(0, 10);
+        
+        let historyHtml = '';
+        displayDocs.forEach(doc => {
+            const promo = doc.data();
+            const startDate = promo.startDate.toDate();
+            const endDate = promo.endDate.toDate();
+            const now = new Date();
+            
+            let status = 'Aktív';
+            let statusClass = 'success';
+            
+            if (!promo.isActive) {
+                if (promo.deactivatedAt) {
+                    status = 'Manuálisan leállítva';
+                    statusClass = 'warning';
+                } else if (promo.expiredAt || endDate < now) {
+                    status = 'Lejárt';
+                    statusClass = 'secondary';
+                }
+            } else if (endDate < now) {
+                status = 'Lejárt (nem frissített)';
+                statusClass = 'danger';
+            }
+            
+            historyHtml += `
+                <tr>
+                    <td>${startDate.toLocaleDateString('hu-HU')} ${startDate.toLocaleTimeString('hu-HU', {hour: '2-digit', minute: '2-digit'})}</td>
+                    <td>${endDate.toLocaleDateString('hu-HU')} ${endDate.toLocaleTimeString('hu-HU', {hour: '2-digit', minute: '2-digit'})}</td>
+                    <td>${promo.durationDays} nap</td>
+                    <td><span class="badge bg-${statusClass}">${status}</span></td>
+                    <td>${promo.createdBy || 'Ismeretlen'}</td>
+                </tr>
+            `;
+        });
+        
+        historyList.innerHTML = historyHtml;
+        
+    } catch (error) {
+        console.error('Error loading promotion history:', error);
+        document.getElementById('promotionHistoryList').innerHTML = 
+            '<tr><td colspan="5" class="text-center text-danger">Hiba a betöltéskor</td></tr>';
+    }
+}
+
+// ===== GLOBÁLIS FUNKCIÓK EXPORTÁLÁSA =====
+// Hogy elérhetők legyenek HTML onclick eseményekből
+
+// Promóció kezelő funkciók
+if (typeof window !== 'undefined') {
+    window.createPromotion = createPromotion;
+    window.deactivatePromotion = deactivatePromotion;
+    window.loadActivePromotion = loadActivePromotion;
+    window.loadPromotionHistory = loadPromotionHistory;
+    window.extendExistingLicenses = extendExistingLicenses;
+    window.updateTimeLeft = updateTimeLeft;
+    window.displayActivePromotion = displayActivePromotion;
+    window.hideActivePromotion = hideActivePromotion;
+    window.deactivateExpiredPromotion = deactivateExpiredPromotion;
+}
+
+// Debug célból
+console.log('Promotion functions loaded:', {
+    createPromotion: typeof createPromotion,
+    deactivatePromotion: typeof deactivatePromotion,
+    loadActivePromotion: typeof loadActivePromotion,
+    loadPromotionHistory: typeof loadPromotionHistory
+});
