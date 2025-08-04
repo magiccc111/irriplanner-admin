@@ -1723,3 +1723,27 @@ async function loadPromotionHistory() {
             '<tr><td colspan="5" class="text-center text-danger">Hiba a betöltéskor</td></tr>';
     }
 }
+
+// ===== GLOBÁLIS FUNKCIÓK EXPORTÁLÁSA =====
+// Hogy elérhetők legyenek HTML onclick eseményekből
+
+// Promóció kezelő funkciók
+if (typeof window !== 'undefined') {
+    window.createPromotion = createPromotion;
+    window.deactivatePromotion = deactivatePromotion;
+    window.loadActivePromotion = loadActivePromotion;
+    window.loadPromotionHistory = loadPromotionHistory;
+    window.extendExistingLicenses = extendExistingLicenses;
+    window.updateTimeLeft = updateTimeLeft;
+    window.displayActivePromotion = displayActivePromotion;
+    window.hideActivePromotion = hideActivePromotion;
+    window.deactivateExpiredPromotion = deactivateExpiredPromotion;
+}
+
+// Debug célból
+console.log('Promotion functions loaded:', {
+    createPromotion: typeof createPromotion,
+    deactivatePromotion: typeof deactivatePromotion,
+    loadActivePromotion: typeof loadActivePromotion,
+    loadPromotionHistory: typeof loadPromotionHistory
+});
