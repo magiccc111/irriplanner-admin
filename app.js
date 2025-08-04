@@ -188,6 +188,8 @@ function showAdminPanel() {
     loadLicenses();
     loadAndDisplayCurrentVersion();
     loadUsageStats(); // Load usage statistics
+    loadActivePromotion(); // Load active promotion status
+    loadPromotionHistory(); // Load promotion history
 }
 
 // ✅ Admin panel verziószám megjelenítése
@@ -1398,5 +1400,326 @@ function showExportStatus(message, type) {
         setTimeout(() => {
             exportStatus.classList.add('d-none');
         }, 5000);
+    }
+}
+
+// ===== PROMOTION MANAGEMENT FUNCTIONS =====
+
+// Initialize promotion start date to current time
+document.addEventListener('DOMContentLoaded', function() {
+    // Set default start date to current time
+    const now = new Date();
+    const localISOTime = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    const startDateInput = document.getElementById('promotionStartDate');
+    if (startDateInput) {
+        startDateInput.value = localISOTime;
+    }
+});
+
+// Load active promotion status
+async function loadActivePromotion() {
+    try {
+        const promoDoc = await db.collection('promotions').doc('active_promotion').get();
+        
+        if (promoDoc.exists) {
+            const promoData = promoDoc.data();
+            
+            // Check if promotion is still active
+            const now = new Date();
+            const endDate = promoData.endDate.toDate();
+            
+            if (promoData.isActive && endDate > now) {
+                // Show active promotion status
+                displayActivePromotion(promoData);
+            } else if (promoData.isActive && endDate <= now) {
+                // Promotion expired, deactivate it
+                await deactivateExpiredPromotion();
+            }
+        }
+    } catch (error) {
+        console.error('Error loading active promotion:', error);
+    }
+}
+
+// Display active promotion
+function displayActivePromotion(promoData) {
+    const statusDiv = document.getElementById('activePromotionStatus');
+    const formDiv = document.getElementById('createPromotionForm');
+    
+    // Show status, hide form
+    statusDiv.classList.remove('d-none');
+    formDiv.classList.add('d-none');
+    
+    // Fill in promotion details
+    const startDate = promoData.startDate.toDate();
+    const endDate = promoData.endDate.toDate();
+    
+    document.getElementById('promoStartDate').textContent = startDate.toLocaleDateString('hu-HU') + ' ' + startDate.toLocaleTimeString('hu-HU');
+    document.getElementById('promoEndDate').textContent = endDate.toLocaleDateString('hu-HU') + ' ' + endDate.toLocaleTimeString('hu-HU');
+    
+    // Calculate time left
+    updateTimeLeft(endDate);
+    
+    // Update time left every minute
+    setInterval(() => updateTimeLeft(endDate), 60000);
+}
+
+// Update time left display
+function updateTimeLeft(endDate) {
+    const now = new Date();
+    const timeLeft = endDate - now;
+    
+    if (timeLeft <= 0) {
+        document.getElementById('promoTimeLeft').textContent = 'Lejárt';
+        // Refresh the page to update status
+        setTimeout(() => window.location.reload(), 2000);
+        return;
+    }
+    
+    const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+    
+    let timeLeftText = '';
+    if (days > 0) timeLeftText += `${days} nap `;
+    if (hours > 0) timeLeftText += `${hours} óra `;
+    if (minutes > 0) timeLeftText += `${minutes} perc`;
+    
+    document.getElementById('promoTimeLeft').textContent = timeLeftText || 'Kevesebb mint 1 perc';
+}
+
+// Create and activate promotion
+async function createPromotion() {
+    const daysInput = document.getElementById('promotionDays');
+    const startDateInput = document.getElementById('promotionStartDate');
+    
+    const days = parseInt(daysInput.value);
+    const startDateStr = startDateInput.value;
+    
+    if (!days || days < 1 || days > 365) {
+        alert('Kérjük, adjon meg egy érvényes időtartamot (1-365 nap)!');
+        return;
+    }
+    
+    if (!startDateStr) {
+        alert('Kérjük, válasszon kezdési dátumot!');
+        return;
+    }
+    
+    const startDate = new Date(startDateStr);
+    const endDate = new Date(startDate.getTime() + (days * 24 * 60 * 60 * 1000));
+    const now = new Date();
+    
+    if (startDate < now) {
+        if (!confirm('A kezdési dátum a múltban van. Szeretné most azonnal elindítani a promóciót?')) {
+            return;
+        }
+        // Set start date to now if user confirms
+        startDate.setTime(now.getTime());
+        endDate.setTime(now.getTime() + (days * 24 * 60 * 60 * 1000));
+    }
+    
+    try {
+        // Check if there's already an active promotion
+        const existingPromo = await db.collection('promotions').doc('active_promotion').get();
+        if (existingPromo.exists && existingPromo.data().isActive) {
+            if (!confirm('Már van aktív promóció! Biztosan lecseréli az újra?')) {
+                return;
+            }
+        }
+        
+        // Get current user
+        const user = auth.currentUser;
+        if (!user) {
+            alert('Nincs bejelentkezve!');
+            return;
+        }
+        
+        // Create promotion document
+        const promotionData = {
+            startDate: startDate,
+            endDate: endDate,
+            durationDays: days,
+            isActive: true,
+            createdBy: user.email,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        
+        // Save active promotion
+        await db.collection('promotions').doc('active_promotion').set(promotionData);
+        
+        // Save to history
+        const historyId = `promo_${Date.now()}`;
+        await db.collection('promotions').doc(historyId).set({
+            ...promotionData,
+            historyId: historyId
+        });
+        
+        // Extend existing licenses
+        await extendExistingLicenses(days);
+        
+        alert(`Promóció sikeresen aktiválva! Időtartam: ${days} nap`);
+        
+        // Clear form
+        daysInput.value = '';
+        
+        // Refresh displays
+        loadActivePromotion();
+        loadPromotionHistory();
+        
+    } catch (error) {
+        console.error('Error creating promotion:', error);
+        alert('Hiba történt a promóció létrehozásakor: ' + error.message);
+    }
+}
+
+// Extend existing licenses
+async function extendExistingLicenses(days) {
+    try {
+        console.log(`Extending all active licenses by ${days} days...`);
+        
+        const licensesSnapshot = await db.collection('licenses')
+            .where('status', '==', 'active')
+            .get();
+        
+        const batch = db.batch();
+        let extendedCount = 0;
+        
+        licensesSnapshot.forEach(doc => {
+            const licenseData = doc.data();
+            const currentExpiry = licenseData.expiresAt.toDate();
+            const newExpiry = new Date(currentExpiry.getTime() + (days * 24 * 60 * 60 * 1000));
+            
+            batch.update(doc.ref, {
+                expiresAt: newExpiry,
+                extendedByPromotion: true,
+                promotionExtensionDays: (licenseData.promotionExtensionDays || 0) + days,
+                lastPromotionExtension: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            extendedCount++;
+        });
+        
+        if (extendedCount > 0) {
+            await batch.commit();
+            console.log(`Successfully extended ${extendedCount} licenses by ${days} days`);
+        } else {
+            console.log('No active licenses found to extend');
+        }
+        
+    } catch (error) {
+        console.error('Error extending licenses:', error);
+        throw error;
+    }
+}
+
+// Deactivate promotion
+async function deactivatePromotion() {
+    if (!confirm('Biztosan le szeretné állítani a promóciót? Ez nem fogja visszaállítani a meghosszabbított licenszeket.')) {
+        return;
+    }
+    
+    try {
+        await db.collection('promotions').doc('active_promotion').update({
+            isActive: false,
+            deactivatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            deactivatedBy: auth.currentUser?.email || 'unknown'
+        });
+        
+        alert('Promóció sikeresen leállítva!');
+        
+        // Refresh displays
+        hideActivePromotion();
+        loadPromotionHistory();
+        
+    } catch (error) {
+        console.error('Error deactivating promotion:', error);
+        alert('Hiba történt a promóció leállításakor: ' + error.message);
+    }
+}
+
+// Deactivate expired promotion automatically
+async function deactivateExpiredPromotion() {
+    try {
+        await db.collection('promotions').doc('active_promotion').update({
+            isActive: false,
+            expiredAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        console.log('Expired promotion automatically deactivated');
+        
+    } catch (error) {
+        console.error('Error deactivating expired promotion:', error);
+    }
+}
+
+// Hide active promotion display
+function hideActivePromotion() {
+    const statusDiv = document.getElementById('activePromotionStatus');
+    const formDiv = document.getElementById('createPromotionForm');
+    
+    // Hide status, show form
+    statusDiv.classList.add('d-none');
+    formDiv.classList.remove('d-none');
+}
+
+// Load promotion history
+async function loadPromotionHistory() {
+    try {
+        const historyList = document.getElementById('promotionHistoryList');
+        historyList.innerHTML = '<tr><td colspan="5" class="text-center">Betöltés...</td></tr>';
+        
+        const historySnapshot = await db.collection('promotions')
+            .where('historyId', '!=', null)
+            .orderBy('createdAt', 'desc')
+            .limit(10)
+            .get();
+        
+        if (historySnapshot.empty) {
+            historyList.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Nincs korábbi promóció</td></tr>';
+            return;
+        }
+        
+        let historyHtml = '';
+        
+        historySnapshot.forEach(doc => {
+            const promo = doc.data();
+            const startDate = promo.startDate.toDate();
+            const endDate = promo.endDate.toDate();
+            const now = new Date();
+            
+            let status = 'Aktív';
+            let statusClass = 'success';
+            
+            if (!promo.isActive) {
+                if (promo.deactivatedAt) {
+                    status = 'Manuálisan leállítva';
+                    statusClass = 'warning';
+                } else if (promo.expiredAt || endDate < now) {
+                    status = 'Lejárt';
+                    statusClass = 'secondary';
+                }
+            } else if (endDate < now) {
+                status = 'Lejárt (nem frissített)';
+                statusClass = 'danger';
+            }
+            
+            historyHtml += `
+                <tr>
+                    <td>${startDate.toLocaleDateString('hu-HU')} ${startDate.toLocaleTimeString('hu-HU', {hour: '2-digit', minute: '2-digit'})}</td>
+                    <td>${endDate.toLocaleDateString('hu-HU')} ${endDate.toLocaleTimeString('hu-HU', {hour: '2-digit', minute: '2-digit'})}</td>
+                    <td>${promo.durationDays} nap</td>
+                    <td><span class="badge bg-${statusClass}">${status}</span></td>
+                    <td>${promo.createdBy || 'Ismeretlen'}</td>
+                </tr>
+            `;
+        });
+        
+        historyList.innerHTML = historyHtml;
+        
+    } catch (error) {
+        console.error('Error loading promotion history:', error);
+        document.getElementById('promotionHistoryList').innerHTML = 
+            '<tr><td colspan="5" class="text-center text-danger">Hiba a betöltéskor</td></tr>';
     }
 }

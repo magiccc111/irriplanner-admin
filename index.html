@@ -89,6 +89,80 @@
                 </div>
             </div>
             
+            <!-- Promotion Management -->
+            <div class="card mb-4 p-3">
+                <h3 class="h5">Ingyenes Napok Promóció</h3>
+                
+                <!-- Active Promotion Status -->
+                <div id="activePromotionStatus" class="alert alert-info d-none">
+                    <h6 class="mb-2">🎉 Aktív Promóció</h6>
+                    <div class="row">
+                        <div class="col-md-4">
+                            <small><strong>Kezdés:</strong> <span id="promoStartDate">-</span></small>
+                        </div>
+                        <div class="col-md-4">
+                            <small><strong>Vége:</strong> <span id="promoEndDate">-</span></small>
+                        </div>
+                        <div class="col-md-4">
+                            <small><strong>Hátralévő:</strong> <span id="promoTimeLeft">-</span></small>
+                        </div>
+                    </div>
+                    <div class="mt-2">
+                        <button onclick="deactivatePromotion()" class="btn btn-warning btn-sm">
+                            Promóció Leállítása
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Create New Promotion -->
+                <div id="createPromotionForm">
+                    <div class="row align-items-end">
+                        <div class="col-md-4">
+                            <label for="promotionDays" class="form-label">Promóció időtartama (napokban):</label>
+                            <input type="number" id="promotionDays" class="form-control" placeholder="pl. 7" min="1" max="365">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="promotionStartDate" class="form-label">Kezdési dátum:</label>
+                            <input type="datetime-local" id="promotionStartDate" class="form-control">
+                        </div>
+                        <div class="col-md-4">
+                            <button onclick="createPromotion()" class="btn btn-success w-100">
+                                Promóció Aktiválása
+                            </button>
+                        </div>
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-12">
+                            <small class="text-muted">
+                                ⚠️ A promóció alatt minden felhasználó hozzáfér a licenszelt funkciókhoz. 
+                                A meglévő licenszek automatikusan meghosszabbodnak a promóció időtartamával.
+                            </small>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Promotion History -->
+                <div class="mt-4">
+                    <h6>Promóció Történet</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Kezdés</th>
+                                    <th>Vége</th>
+                                    <th>Időtartam</th>
+                                    <th>Státusz</th>
+                                    <th>Létrehozta</th>
+                                </tr>
+                            </thead>
+                            <tbody id="promotionHistoryList">
+                                <!-- Promotion history will be loaded here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
             <!-- Generate License Form -->
             <div class="card mb-4 p-3">
                 <h3 class="h5">Generate New License</h3>
