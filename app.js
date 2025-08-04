@@ -1470,50 +1470,124 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Load active promotion status
 async function loadActivePromotion() {
+    console.log('🔄 Loading active promotion...');
+    
     try {
         const promoDoc = await db.collection('promotions').doc('active_promotion').get();
         
+        console.log('📄 Promotion document exists:', promoDoc.exists);
+        
         if (promoDoc.exists) {
             const promoData = promoDoc.data();
+            console.log('📊 Promotion data:', promoData);
+            
+            // Check if promotion data is valid
+            if (!promoData.endDate) {
+                console.warn('⚠️ No endDate found in promotion data');
+                return;
+            }
             
             // Check if promotion is still active
             const now = new Date();
             const endDate = promoData.endDate.toDate();
             
+            console.log('⏰ Current time:', now);
+            console.log('⏰ Promotion end time:', endDate);
+            console.log('✅ Is active flag:', promoData.isActive);
+            console.log('⏳ Time remaining:', endDate - now, 'ms');
+            
             if (promoData.isActive && endDate > now) {
                 // Show active promotion status
+                console.log('🎉 Displaying active promotion');
                 displayActivePromotion(promoData);
             } else if (promoData.isActive && endDate <= now) {
                 // Promotion expired, deactivate it
+                console.log('⏰ Promotion expired, deactivating...');
                 await deactivateExpiredPromotion();
+            } else {
+                console.log('❌ Promotion is not active or expired');
+                hideActivePromotion();
             }
+        } else {
+            console.log('📭 No active promotion found');
+            hideActivePromotion();
         }
     } catch (error) {
-        console.error('Error loading active promotion:', error);
+        console.error('❌ Error loading active promotion:', error);
+        console.error('Error details:', error.code, error.message);
+        
+        // Show error message to user
+        const statusDiv = document.getElementById('activePromotionStatus');
+        if (statusDiv) {
+            statusDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <h6 class="mb-2">❌ Hiba a promóció betöltésekor</h6>
+                    <small>${error.message}</small>
+                </div>
+            `;
+            statusDiv.classList.remove('d-none');
+        }
     }
 }
 
 // Display active promotion
 function displayActivePromotion(promoData) {
+    console.log('🎨 Displaying active promotion with data:', promoData);
+    
     const statusDiv = document.getElementById('activePromotionStatus');
     const formDiv = document.getElementById('createPromotionForm');
+    
+    // Check if required elements exist
+    if (!statusDiv) {
+        console.error('❌ activePromotionStatus element not found');
+        return;
+    }
+    if (!formDiv) {
+        console.error('❌ createPromotionForm element not found');
+        return;
+    }
     
     // Show status, hide form
     statusDiv.classList.remove('d-none');
     formDiv.classList.add('d-none');
     
-    // Fill in promotion details
-    const startDate = promoData.startDate.toDate();
-    const endDate = promoData.endDate.toDate();
-    
-    document.getElementById('promoStartDate').textContent = startDate.toLocaleDateString('hu-HU') + ' ' + startDate.toLocaleTimeString('hu-HU');
-    document.getElementById('promoEndDate').textContent = endDate.toLocaleDateString('hu-HU') + ' ' + endDate.toLocaleTimeString('hu-HU');
-    
-    // Calculate time left
-    updateTimeLeft(endDate);
-    
-    // Update time left every minute
-    setInterval(() => updateTimeLeft(endDate), 60000);
+    try {
+        // Fill in promotion details
+        const startDate = promoData.startDate ? promoData.startDate.toDate() : new Date();
+        const endDate = promoData.endDate.toDate();
+        
+        const startDateElement = document.getElementById('promoStartDate');
+        const endDateElement = document.getElementById('promoEndDate');
+        
+        if (startDateElement) {
+            startDateElement.textContent = startDate.toLocaleDateString('hu-HU') + ' ' + startDate.toLocaleTimeString('hu-HU');
+        } else {
+            console.error('❌ promoStartDate element not found');
+        }
+        
+        if (endDateElement) {
+            endDateElement.textContent = endDate.toLocaleDateString('hu-HU') + ' ' + endDate.toLocaleTimeString('hu-HU');
+        } else {
+            console.error('❌ promoEndDate element not found');
+        }
+        
+        // Calculate time left
+        updateTimeLeft(endDate);
+        
+        // Update time left every minute
+        setInterval(() => updateTimeLeft(endDate), 60000);
+        
+        console.log('✅ Active promotion displayed successfully');
+        
+    } catch (error) {
+        console.error('❌ Error displaying promotion:', error);
+        statusDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <h6 class="mb-2">❌ Hiba a promóció megjelenítésekor</h6>
+                <small>${error.message}</small>
+            </div>
+        `;
+    }
 }
 
 // Update time left display
@@ -1803,10 +1877,47 @@ if (typeof window !== 'undefined') {
     window.deactivateExpiredPromotion = deactivateExpiredPromotion;
 }
 
+// Debug promotion status
+async function debugPromotionStatus() {
+    console.log('🔍 DEBUG: Checking promotion status...');
+    
+    try {
+        // Check if Firebase is initialized
+        console.log('🔥 Firebase auth state:', auth.currentUser ? 'Logged in' : 'Not logged in');
+        
+        // Check elements exist
+        const statusDiv = document.getElementById('activePromotionStatus');
+        const formDiv = document.getElementById('createPromotionForm');
+        console.log('🎯 HTML elements:', {
+            statusDiv: !!statusDiv,
+            formDiv: !!formDiv
+        });
+        
+        // Try to fetch promotion data directly
+        const promoDoc = await db.collection('promotions').doc('active_promotion').get();
+        console.log('📄 Raw promotion document:', {
+            exists: promoDoc.exists,
+            data: promoDoc.exists ? promoDoc.data() : null
+        });
+        
+        // Call the main function
+        await loadActivePromotion();
+        
+    } catch (error) {
+        console.error('❌ Debug error:', error);
+    }
+}
+
+// Make debug function globally available
+if (typeof window !== 'undefined') {
+    window.debugPromotionStatus = debugPromotionStatus;
+}
+
 // Debug célból
 console.log('Promotion functions loaded:', {
     createPromotion: typeof createPromotion,
     deactivatePromotion: typeof deactivatePromotion,
     loadActivePromotion: typeof loadActivePromotion,
-    loadPromotionHistory: typeof loadPromotionHistory
+    loadPromotionHistory: typeof loadPromotionHistory,
+    debugPromotionStatus: typeof debugPromotionStatus
 });
