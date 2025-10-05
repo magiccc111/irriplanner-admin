@@ -364,6 +364,7 @@ async function loadLicenses() {
                     <td>
                         <button onclick="revokeLicense('${doc.id}')" class="btn btn-sm btn-danger">Revoke</button>
                         <button onclick="deleteLicense('${doc.id}')" class="btn btn-sm btn-warning ms-1">Törlés</button>
+                        <button onclick="openEditExpiryModal('${doc.id}', ${expiryDate.getTime()})" class="btn btn-sm btn-secondary ms-1">Lejárat módosítás</button>
                     </td>
                 </tr>
             `;
@@ -403,6 +404,88 @@ async function deleteLicense(licenseKey) {
         } catch (error) {
             alert('Hiba a licensz törlésekor: ' + error.message);
         }
+    }
+}
+
+// ===== Lejárati dátum szerkesztése =====
+let editingLicenseKey = null;
+
+function formatDateForInput(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function openEditExpiryModal(licenseKey, expiryMs) {
+    try {
+        editingLicenseKey = licenseKey;
+        const keyInput = document.getElementById('editExpiryLicenseKey');
+        const dateInput = document.getElementById('editExpiryDate');
+        if (keyInput) keyInput.value = licenseKey;
+        if (dateInput) {
+            const date = expiryMs ? new Date(expiryMs) : new Date();
+            dateInput.value = formatDateForInput(date);
+        }
+        const modalEl = document.getElementById('editExpiryModal');
+        if (modalEl) {
+            const modal = new bootstrap.Modal(modalEl);
+            modal.show();
+        }
+    } catch (err) {
+        console.error('Error opening edit expiry modal:', err);
+        alert('Nem sikerült megnyitni a szerkesztőt.');
+    }
+}
+
+async function saveEditedExpiry() {
+    if (!editingLicenseKey) {
+        alert('Hiányzó licensz kulcs.');
+        return;
+    }
+    const dateInput = document.getElementById('editExpiryDate');
+    if (!dateInput || !dateInput.value) {
+        alert('Kérjük, válasszon új lejárati dátumot.');
+        return;
+    }
+    try {
+        // Dátum beállítása a nap végére (23:59:59)
+        const parts = dateInput.value.split('-');
+        const newDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 23, 59, 59, 999);
+
+        await db.collection('licenses').doc(editingLicenseKey).update({
+            expiresAt: newDate
+        });
+
+        // Modal bezárása
+        const modalEl = document.getElementById('editExpiryModal');
+        if (modalEl) {
+            const instance = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+            instance.hide();
+        }
+
+        alert('Lejárati dátum frissítve.');
+        loadLicenses();
+    } catch (error) {
+        console.error('Error updating expiry date:', error);
+        alert('Hiba a lejárati dátum frissítésekor: ' + error.message);
+    } finally {
+        editingLicenseKey = null;
+    }
+}
+
+// Inaktív lista megjelenítése/elrejtése
+function toggleInactive() {
+    const container = document.getElementById('inactiveLicensesContainer');
+    const btn = document.getElementById('toggleInactiveBtn');
+    if (!container || !btn) return;
+    const hidden = container.classList.contains('d-none');
+    if (hidden) {
+        container.classList.remove('d-none');
+        btn.textContent = 'Elrejtés';
+    } else {
+        container.classList.add('d-none');
+        btn.textContent = 'Mutasd';
     }
 }
 
@@ -1875,6 +1958,10 @@ if (typeof window !== 'undefined') {
     window.displayActivePromotion = displayActivePromotion;
     window.hideActivePromotion = hideActivePromotion;
     window.deactivateExpiredPromotion = deactivateExpiredPromotion;
+    // License helper functions
+    window.openEditExpiryModal = openEditExpiryModal;
+    window.saveEditedExpiry = saveEditedExpiry;
+    window.toggleInactive = toggleInactive;
 }
 
 // Debug promotion status

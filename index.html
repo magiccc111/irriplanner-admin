@@ -217,8 +217,11 @@
             
             <!-- Inactive Licenses -->
             <div class="card p-3 mb-4">
-                <h3 class="h5 mb-3">Inaktív Licencek</h3>
-                <div class="table-responsive">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h3 class="h5 mb-0">Inaktív Licencek</h3>
+                    <button id="toggleInactiveBtn" onclick="toggleInactive()" class="btn btn-sm btn-secondary">Mutasd</button>
+                </div>
+                <div id="inactiveLicensesContainer" class="table-responsive d-none">
                     <table class="table">
                         <thead>
                             <tr>
@@ -342,5 +345,32 @@
     <script src="config.js"></script>
     <script src="emailjs-config.js"></script>
     <script src="app.js"></script>
+    
+    <!-- Edit Expiry Modal -->
+    <div class="modal fade" id="editExpiryModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Lejárati dátum módosítása</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label">Licensz kulcs</label>
+                        <input type="text" id="editExpiryLicenseKey" class="form-control" disabled>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Új lejárati dátum</label>
+                        <input type="date" id="editExpiryDate" class="form-control">
+                        <small class="text-muted">A változtatás az egész napra vonatkozik (23:59:59-ig).</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Mégse</button>
+                    <button type="button" class="btn btn-primary" onclick="saveEditedExpiry()">Mentés</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
