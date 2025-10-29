@@ -9,7 +9,7 @@
 })();
 
 // ✅ ADMIN PANEL VERZIÓ
-const ADMIN_PANEL_VERSION = 'v1.3.0';
+const ADMIN_PANEL_VERSION = 'v1.4.0';
 
 // ✅ CACHE KEZELŐ RENDSZER
 class FirebaseCache {
@@ -170,6 +170,7 @@ class FirebaseCache {
 
 // Globális cache instance
 const firebaseCache = new FirebaseCache();
+const USAGE_STATS_LOOKBACK_DAYS = 2;
 
 // ✅ Helper funkció a biztonságos Date konverzióhoz
 function safeToDate(timestamp) {
@@ -188,6 +189,24 @@ function safeToDate(timestamp) {
     } catch (error) {
         console.warn('Date conversion error:', error, 'Using current date as fallback');
         return new Date();
+    }
+}
+
+function updateMetricElement(elementId, value) {
+    const element = document.getElementById(elementId);
+    if (!element) {
+        return;
+    }
+
+    if (value === null || value === undefined || (typeof value === 'number' && !Number.isFinite(value))) {
+        element.textContent = '-';
+        return;
+    }
+
+    if (typeof value === 'number') {
+        element.textContent = value.toLocaleString('hu-HU');
+    } else {
+        element.textContent = value;
     }
 }
 
@@ -546,89 +565,140 @@ function displayCurrentSavedVersion(version) {
 // Load usage statistics
 async function loadUsageStats() {
     try {
+        const summaryPromise = db.collection('analytics_summary').doc('usage').get();
+
         let usageData = null;
         let isFromCache = false;
 
-        // ✅ 1. CACHE ELLENŐRZÉS - USAGE STATS
         const cachedUsageStats = firebaseCache.get(firebaseCache.CACHE_KEYS.USAGE_STATS);
-
         if (cachedUsageStats) {
-            // Van érvényes cache
-            usageData = cachedUsageStats;
-            isFromCache = true;
-            console.log('📦 Using cached usage stats');
-            
-            // ✅ FIX: Timestamp string-ek visszaalakítása Date objektumokká
-            usageData = usageData.map(record => ({
+            usageData = cachedUsageStats.map(record => ({
                 ...record,
                 timestamp: safeToDate(record.timestamp)
             }));
+            isFromCache = true;
+            console.log('📦 Using cached usage stats (recent window)');
         } else {
-            // ✅ 2. FIREBASE LEKÉRÉS
-            console.log('🔄 Loading fresh usage stats from Firebase...');
-            
             const now = new Date();
-            const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
-            
-            const snapshot = await db.collection('usage_stats')
-                .where('timestamp', '>=', sevenDaysAgo)
-                .orderBy('timestamp', 'desc')
-                .get(); // Eltávolítottuk a limit-et a teljes adat eléréséhez
+            const lookbackMs = USAGE_STATS_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+            const lookbackStart = new Date(now.getTime() - lookbackMs);
 
-            // Adatok átalakítása cache-eléshez
+            console.log(`🔄 Loading usage stats from Firebase (last ${USAGE_STATS_LOOKBACK_DAYS} days)...`);
+            const snapshot = await db.collection('usage_stats')
+                .where('timestamp', '>=', lookbackStart)
+                .orderBy('timestamp', 'desc')
+                .get();
+
             usageData = snapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data(),
                 timestamp: safeToDate(doc.data().timestamp)
             }));
 
-            // ✅ 3. CACHE MENTÉS
             firebaseCache.set(firebaseCache.CACHE_KEYS.USAGE_STATS, usageData);
         }
 
-        // ✅ 4. ADATFELDOLGOZÁS
-        const now = new Date();
+        const summarySnap = await summaryPromise;
+        let totalUnique = null;
+        let everLicensed = null;
+        let everFree = null;
+        let convertedFromFree = null;
+        let freeBeforeLicense = null;
+
+        if (summarySnap.exists) {
+            const summaryData = summarySnap.data() || {};
+            totalUnique = Number.isFinite(summaryData.totalUniqueMachines) ? summaryData.totalUniqueMachines : null;
+            everLicensed = Number.isFinite(summaryData.everLicensedMachines) ? summaryData.everLicensedMachines : null;
+            everFree = Number.isFinite(summaryData.everFreeMachines) ? summaryData.everFreeMachines : null;
+            convertedFromFree = Number.isFinite(summaryData.convertedFromFreeMachines) ? summaryData.convertedFromFreeMachines : null;
+            freeBeforeLicense = Number.isFinite(summaryData.freeBeforeLicenseMachines) ? summaryData.freeBeforeLicenseMachines : null;
+            console.log('📊 Aggregated usage summary loaded', summaryData);
+        } else {
+            console.warn('ℹ️ Aggregated usage summary not found. Using sampled data as fallback.');
+        }
+
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
-
         const uniqueMachines = new Set();
         const licensedMachines = new Set();
         const freeMachines = new Set();
         const todayActiveMachines = new Set();
 
-        usageData.forEach(record => {
-            const machineId = record.machineId;
-            const timestamp = record.timestamp;
+        if (usageData && usageData.length) {
+            usageData.forEach(record => {
+                const machineId = record.machineId || record.machine_id;
+                if (!machineId) {
+                    return;
+                }
 
-            uniqueMachines.add(machineId);
+                uniqueMachines.add(machineId);
 
-            if (record.isLicensed) {
-                licensedMachines.add(machineId);
-            } else {
-                freeMachines.add(machineId);
-            }
+                const licensedFlag = Boolean(record.isLicensed ?? record.is_licensed ?? record.licenseStatus);
+                if (licensedFlag) {
+                    licensedMachines.add(machineId);
+                } else {
+                    freeMachines.add(machineId);
+                }
 
-            if (timestamp >= todayStart) {
-                todayActiveMachines.add(machineId);
-            }
-        });
+                if (record.timestamp && record.timestamp >= todayStart) {
+                    todayActiveMachines.add(machineId);
+                }
+            });
 
-        // ✅ 5. UI FRISSÍTÉS
-        document.getElementById('totalUniqueUsers').textContent = uniqueMachines.size;
-        document.getElementById('licensedUsers').textContent = licensedMachines.size;
-        document.getElementById('freeUsers').textContent = freeMachines.size;
-        document.getElementById('todayActiveUsers').textContent = todayActiveMachines.size;
-
-        // ✅ 6. CACHE STÁTUSZ LOG
-        if (isFromCache) {
-            console.log(`📦 Usage stats from cache: ${usageData.length} records`);
+            updateMetricElement('todayActiveUsers', todayActiveMachines.size);
         } else {
-            console.log(`🔄 Fresh usage stats loaded: ${usageData.length} records (cached for 60 min)`);
+            updateMetricElement('todayActiveUsers', null);
         }
 
+        if (totalUnique === null) {
+            totalUnique = uniqueMachines.size;
+        }
+        if (everLicensed === null) {
+            everLicensed = licensedMachines.size;
+        }
+        if (everFree === null) {
+            everFree = freeMachines.size;
+        }
+        if (freeBeforeLicense === null) {
+            freeBeforeLicense = freeMachines.size;
+        }
+        if (convertedFromFree === null) {
+            const convertedFallback = Array.from(licensedMachines).filter(machineId => freeMachines.has(machineId)).length;
+            convertedFromFree = convertedFallback;
+        }
+
+        const freeUsersCount = (totalUnique != null && everLicensed != null)
+            ? Math.max(totalUnique - everLicensed, 0)
+            : null;
+
+        const conversionDenominator = Number.isFinite(freeBeforeLicense) ? freeBeforeLicense : everFree;
+        let conversionRateDisplay = '-';
+        if (Number.isFinite(convertedFromFree) && Number.isFinite(conversionDenominator)) {
+            conversionRateDisplay = conversionDenominator === 0
+                ? '0%'
+                : `${((convertedFromFree / conversionDenominator) * 100).toFixed(1)}%`;
+        }
+
+        updateMetricElement('totalUniqueUsers', totalUnique);
+        updateMetricElement('convertedUsers', convertedFromFree);
+        updateMetricElement('licensedUsers', everLicensed);
+        updateMetricElement('freeUsers', freeUsersCount);
+        updateMetricElement('conversionRate', conversionRateDisplay);
+
+        if (isFromCache) {
+            console.log(`📦 Usage stats from cache: ${usageData.length} records`);
+        } else if (usageData) {
+            console.log(`🔄 Fresh usage stats loaded: ${usageData.length} records (cached ${USAGE_STATS_LOOKBACK_DAYS} day window)`);
+        }
     } catch (error) {
         console.error('Error loading usage stats:', error);
         alert('Error loading usage statistics: ' + error.message);
+        updateMetricElement('totalUniqueUsers', null);
+        updateMetricElement('convertedUsers', null);
+        updateMetricElement('licensedUsers', null);
+        updateMetricElement('freeUsers', null);
+        updateMetricElement('conversionRate', null);
+        updateMetricElement('todayActiveUsers', null);
     }
 }
 

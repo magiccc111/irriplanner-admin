@@ -32,35 +32,51 @@
             
             <!-- Usage Statistics -->
             <div class="card mb-4 p-3">
-                <h3 class="h5">Használati Statisztikák (Elmúlt 7 nap)</h3>
-                <div class="row">
-                    <div class="col-md-3">
-                        <div class="card bg-light">
-                            <div class="card-body text-center">
+                <h3 class="h5">Használati Statisztikák (All Time + elmúlt 2 nap)</h3>
+                <div class="row g-3">
+                    <div class="col-sm-6 col-md-4 col-lg-2">
+                        <div class="card bg-light h-100">
+                            <div class="card-body text-center d-flex flex-column justify-content-center">
                                 <h5 class="card-title">Összes Egyedi Felhasználó</h5>
                                 <p class="h2" id="totalUniqueUsers">-</p>
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-3">
-                        <div class="card bg-light">
-                            <div class="card-body text-center">
-                                <h5 class="card-title">Licenszelt Felhasználók</h5>
+                    <div class="col-sm-6 col-md-4 col-lg-2">
+                        <div class="card bg-light h-100">
+                            <div class="card-body text-center d-flex flex-column justify-content-center">
+                                <h5 class="card-title">Konvertált Felhasználók</h5>
+                                <p class="h2" id="convertedUsers">-</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-sm-6 col-md-4 col-lg-2">
+                        <div class="card bg-light h-100">
+                            <div class="card-body text-center d-flex flex-column justify-content-center">
+                                <h5 class="card-title">Valaha Fizetős Felhasználók</h5>
                                 <p class="h2" id="licensedUsers">-</p>
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-3">
-                        <div class="card bg-light">
-                            <div class="card-body text-center">
+                    <div class="col-sm-6 col-md-4 col-lg-2">
+                        <div class="card bg-light h-100">
+                            <div class="card-body text-center d-flex flex-column justify-content-center">
+                                <h5 class="card-title">Konverziós Arány</h5>
+                                <p class="h2" id="conversionRate">-</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-sm-6 col-md-4 col-lg-2">
+                        <div class="card bg-light h-100">
+                            <div class="card-body text-center d-flex flex-column justify-content-center">
                                 <h5 class="card-title">Ingyenes Felhasználók</h5>
                                 <p class="h2" id="freeUsers">-</p>
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-3">
-                        <div class="card bg-light">
-                            <div class="card-body text-center">
+                    <div class="col-sm-6 col-md-4 col-lg-2">
+                        <div class="card bg-light h-100">
+                            <div class="card-body text-center d-flex flex-column justify-content-center">
                                 <h5 class="card-title">Mai Aktív Felhasználók</h5>
                                 <p class="h2" id="todayActiveUsers">-</p>
                             </div>
@@ -69,6 +85,7 @@
                 </div>
                 <div class="mt-3">
                     <button onclick="refreshUsageStats()" class="btn btn-sm btn-info">Frissítés</button>
+                    <small class="d-block text-muted mt-2">Az összesített számok az <code>analytics_summary/usage</code> dokumentumból érkeznek, a mai aktivitás a legutóbbi 48 óra eseményeiből.</small>
                 </div>
             </div>
             
